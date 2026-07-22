@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CursorPost } from "../../db/queries";
 import ModalPostLink from "../ModalPostLink";
 import { CONTENT_LIMITS } from "../site-config";
@@ -20,6 +20,7 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
   const [activeIndex, setActiveIndex] = useState(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef(initialNextCursor);
   const loadingRef = useRef(false);
   const groups = useMemo(() => groupByYear(rows), [rows]);
@@ -76,19 +77,30 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
     return () => { window.removeEventListener("scroll", onScroll); window.cancelAnimationFrame(frame); };
   }, [rows]);
 
+  useEffect(() => {
+    const rail = timelineRef.current;
+    const active = rail?.querySelector<HTMLElement>(`[data-timeline-index="${activeIndex}"]`);
+    if (!rail || !active) return;
+    const top = active.offsetTop;
+    const bottom = top + active.offsetHeight;
+    const comfort = Math.min(80, rail.clientHeight * 0.24);
+    if (top < rail.scrollTop + comfort || bottom > rail.scrollTop + rail.clientHeight - comfort) {
+      active.scrollIntoView({ block:"center", behavior:"smooth" });
+    }
+  }, [activeIndex, rows.length]);
+
   if (!rows.length) return <div className="empty-state"><b>没有找到文章</b><p>尝试更短的关键词，或者切换分类。</p></div>;
 
   return <>
     <aside className="archive-timeline" aria-label="文章时间轨道">
       <div className="timeline-caption"><span>NOW</span><b>{yearOf(rows[activeIndex]?.publishedAt)}</b></div>
-      <div className="timeline-rail">
+      <div className="timeline-rail" ref={timelineRef}>
         {rows.map((post, index) => {
           const yearStart = index === 0 || yearOf(post.publishedAt) !== yearOf(rows[index - 1]?.publishedAt);
-          const position = rows.length === 1 ? 50 : (index / (rows.length - 1)) * 100;
           return <button
             key={post.id}
             className={`${yearStart ? "year-start" : ""} ${index === activeIndex ? "current" : ""}`}
-            style={{ "--tick-y": `${position}%` } as CSSProperties}
+            data-timeline-index={index}
             aria-label={`跳转到《${post.title}》`}
             onMouseEnter={() => setHoveredIndex(index)}
             onMouseLeave={() => setHoveredIndex(null)}
@@ -100,8 +112,8 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
             }}
           />;
         })}
-        {hoveredIndex !== null && rows[hoveredIndex] && <TimelinePreview post={rows[hoveredIndex]} index={hoveredIndex} total={rows.length} />}
       </div>
+      {hoveredIndex !== null && rows[hoveredIndex] && <TimelinePreview post={rows[hoveredIndex]} index={hoveredIndex} total={rows.length} />}
       <small>PAST</small>
     </aside>
 
@@ -120,8 +132,7 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
 }
 
 function TimelinePreview({ post, index, total }: { post: CursorPost; index: number; total: number }) {
-  const position = total === 1 ? 50 : (index / (total - 1)) * 100;
-  return <div className="timeline-preview" style={{ "--preview-y": `${position}%` } as CSSProperties}>
+  return <div className="timeline-preview">
     <div><span style={{ color: post.categoryColor ?? undefined }}>{post.categoryName}</span><time>{formatLongDate(post.publishedAt, "未定日期")}</time></div>
     <b>{post.title}</b><p>{post.excerpt}</p><small>{yearOf(post.publishedAt)} · 当前已加载第 {index + 1} 篇 · 点击定位</small>
   </div>;
