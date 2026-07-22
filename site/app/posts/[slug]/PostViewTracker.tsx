@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-export default function PostViewTracker({ slug }: { slug: string }) {
+export default function PostViewTracker({ publicId }: { publicId: string }) {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const storageKey = "xingyu-reader-id";
@@ -11,7 +11,7 @@ export default function PostViewTracker({ slug }: { slug: string }) {
         visitor = crypto.randomUUID();
         localStorage.setItem(storageKey, visitor);
       }
-      void fetch(`/api/views/${encodeURIComponent(slug)}`, {
+      void fetch(`/api/views/${encodeURIComponent(publicId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visitor }),
@@ -19,6 +19,6 @@ export default function PostViewTracker({ slug }: { slug: string }) {
       });
     }, 1800);
     return () => window.clearTimeout(timer);
-  }, [slug]);
+  }, [publicId]);
   return null;
 }

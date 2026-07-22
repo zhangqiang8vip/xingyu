@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { cache } from "react";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
-import { categories, contentPages, posts, siteSettings } from "./schema";
+import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
 import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
 
 export type PostFilters = {
@@ -31,7 +31,7 @@ export async function listPosts(filters: PostFilters = {}) {
 
   const [rows, totalRows] = await Promise.all([
     db.select({
-      id: posts.id, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
+      id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
       status: posts.status, featured: posts.featured, viewCount: posts.viewCount,
       publishedAt: posts.publishedAt, updatedAt: posts.updatedAt,
       categoryId: posts.categoryId, categoryName: categories.name,
@@ -59,7 +59,7 @@ export async function listHomePosts(category = "all", requestedLimit: number = C
   const conditions = [eq(posts.status, "published")];
   if (category !== "all") conditions.push(eq(categories.slug, category));
   return getDb().select({
-    id: posts.id, title: posts.title, slug: posts.slug, excerpt: posts.excerpt, content: posts.content,
+    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt, content: posts.content,
     status: posts.status, featured: posts.featured, viewCount: posts.viewCount,
     publishedAt: posts.publishedAt, updatedAt: posts.updatedAt,
     categoryId: posts.categoryId, categoryName: categories.name,
@@ -100,11 +100,39 @@ export async function getAdminStats() {
 export async function getPostBySlug(slug: string) {
   await ensureDatabase();
   const rows = await getDb().select({
-    id: posts.id, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
+    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
     content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
     categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
   }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
     .where(and(eq(posts.slug, slug), eq(posts.status, "published"))).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getPostByPublicId(publicId: string) {
+  await ensureDatabase();
+  const rows = await getDb().select({
+    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
+    content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
+    categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
+  }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
+    .where(and(eq(posts.publicId, publicId), eq(posts.status, "published"))).limit(1);
+  return rows[0] ?? null;
+}
+
+/** Resolves current slugs, historical slugs, and bare public IDs for legacy links. */
+export async function resolvePublicPost(identifier: string) {
+  const direct = await getPostByPublicId(identifier) ?? await getPostBySlug(identifier);
+  if (direct) return direct;
+  await ensureDatabase();
+  const history = await getDb().select({ postId: postSlugHistory.postId })
+    .from(postSlugHistory).where(eq(postSlugHistory.slug, identifier)).limit(1);
+  if (!history[0]) return null;
+  const rows = await getDb().select({
+    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
+    content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
+    categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
+  }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
+    .where(and(eq(posts.id, history[0].postId), eq(posts.status, "published"))).limit(1);
   return rows[0] ?? null;
 }
 
@@ -118,6 +146,7 @@ export async function getPreviousPublishedPost(publishedAt: string | null, id: n
 
 const adjacentPostSelection = {
   id: posts.id,
+  publicId: posts.publicId,
   title: posts.title,
   slug: posts.slug,
   excerpt: posts.excerpt,
@@ -148,6 +177,7 @@ async function getAdjacentPublishedPost(publishedAt: string | null, id: number, 
 
 export type CursorPost = {
   id: number;
+  publicId: string;
   title: string;
   slug: string;
   excerpt: string;
@@ -216,7 +246,7 @@ async function listPostsByCursor(filters: CursorFilters & { sort: "published" | 
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const statement = env.DB.prepare(`SELECT
-    p.id, p.title, p.slug, p.excerpt, p.status, p.featured, p.view_count AS viewCount,
+    p.id, p.public_id AS publicId, p.title, p.slug, p.excerpt, p.status, p.featured, p.view_count AS viewCount,
     p.published_at AS publishedAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
     c.name AS categoryName, c.slug AS categorySlug, c.color AS categoryColor
     ${from} ${where}

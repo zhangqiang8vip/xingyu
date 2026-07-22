@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import VditorEditor from "./VditorEditor";
+import { postPath } from "../post-path";
 import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel";
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";
 import { CONTENT_LIMITS } from "../site-config";
@@ -12,8 +13,8 @@ import ThemeToggle from "../ThemeToggle";
 import { readApiJson } from "../api-response";
 
 type Category = { id: number; name: string; slug: string; color: string };
-type Post = { id: number; title: string; slug: string; excerpt: string; categoryId: number; categoryName: string; status: string; featured: boolean; viewCount: number; publishedAt: string | null; updatedAt: string };
-type FormData = { id?: number; title: string; slug: string; excerpt: string; content: string; categoryId: number; status: "draft" | "published"; featured: boolean; publishedAt?:string | null };
+type Post = { id: number; publicId:string; title: string; slug: string; excerpt: string; categoryId: number; categoryName: string; status: string; featured: boolean; viewCount: number; publishedAt: string | null; updatedAt: string };
+type FormData = { id?: number; publicId?:string; title: string; slug: string; excerpt: string; content: string; categoryId: number; status: "draft" | "published"; featured: boolean; publishedAt?:string | null };
 type Stats = { total:number; published:number; drafts:number; views:number };
 const emptyForm = (categoryId = 1): FormData => ({ title: "", slug: "", excerpt: "", content: "", categoryId, status: "draft", featured: false, publishedAt:null });
 
@@ -159,9 +160,9 @@ export default function AdminClient({ categories:initialCategories, settings, ab
             <div className="form-row"><label>Slug<input value={form.slug} onChange={e => { setForm({ ...form, slug: e.target.value }); setSlugCopied(false); }} placeholder="留空将根据标题自动生成" /></label><label>分类<select value={form.categoryId} onChange={e => setForm({ ...form, categoryId: Number(e.target.value) })}>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div>
             <div className="slug-preview">
               <div className="slug-icon">↗</div>
-              <div className="slug-copy"><small>文章访问地址</small><p><span>{settings.brandName}</span><i>/</i><span>posts</span><i>/</i><b>{slugPreview(form.slug || form.title)}</b></p></div>
+              <div className="slug-copy"><small>文章访问地址 · 永久 ID</small><p><span>{settings.brandName}</span><i>/</i><span>posts</span><i>/</i>{form.publicId&&<><span>{form.publicId.slice(0,8)}…</span><i>/</i></>}<b>{slugPreview(form.slug || form.title)}</b></p></div>
               <span className="slug-category" style={{ color: selectedFormCategory?.color }}>{selectedFormCategory?.name ?? "未分类"}</span>
-              <button type="button" onClick={async () => { await navigator.clipboard.writeText(`${window.location.origin}/posts/${slugPreview(form.slug || form.title)}`); setSlugCopied(true); }}>{slugCopied ? "已复制" : "复制链接"}</button>
+              <button type="button" onClick={async () => { const slug=slugPreview(form.slug || form.title); const path=form.publicId?postPath({publicId:form.publicId,slug}):`/posts/${slug}`; await navigator.clipboard.writeText(`${window.location.origin}${path}`); setSlugCopied(true); }}>{slugCopied ? "已复制" : "复制链接"}</button>
             </div>
             <label>文章摘要<textarea rows={3} value={form.excerpt} onChange={e => setForm({ ...form, excerpt: e.target.value })} placeholder="用一两句话告诉读者这篇文章讲什么" /></label>
           </section>

@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { transitionTo } from "../../RouteTransition";
 import { formatLongDate, isEditableTarget } from "../../content-utils";
+import { postPath } from "../../post-path";
 
 type NeighborPost = {
+  publicId: string;
   slug: string;
   title: string;
   excerpt: string;
@@ -27,8 +29,8 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
   const rootRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (previousPost) router.prefetch(`/posts/${previousPost.slug}`);
-    if (nextPost) router.prefetch(`/posts/${nextPost.slug}`);
+    if (previousPost) router.prefetch(postPath(previousPost));
+    if (nextPost) router.prefetch(postPath(nextPost));
   }, [nextPost, previousPost, router]);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
       if (keyFeedbackTimer.current) clearTimeout(keyFeedbackTimer.current);
       keyFeedbackTimer.current = setTimeout(() => { delete document.documentElement.dataset.keyTurn; }, 180);
       navigator.vibrate?.(12);
-      transitionTo(`/posts/${destination.slug}`, event.key === "ArrowLeft" ? "left" : "right");
+      transitionTo(postPath(destination), event.key === "ArrowLeft" ? "left" : "right");
     };
     window.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
@@ -120,12 +122,12 @@ function SideItem({ direction, post, preview, setPreview, beginLongPress, cancel
   const previous = direction === "previous";
   const open = preview === direction;
   return <div className={`post-side-item ${direction} ${open ? "previewing" : ""}`} onMouseEnter={() => setPreview(direction)} onMouseLeave={() => setPreview(null)} onFocus={() => setPreview(direction)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPreview(null); }}>
-    <Link className="post-side-trigger" href={`/posts/${post.slug}`} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
+    <Link className="post-side-trigger" href={postPath(post)} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
       <i>{previous ? "←" : "→"}</i><span>{previous ? "上一篇" : "下一篇"}</span>
     </Link>
     {open && <div className="post-side-preview" style={{ "--preview-color": post.categoryColor ?? "#0071e3" } as React.CSSProperties}>
       <button type="button" onClick={() => setPreview(null)} aria-label="关闭预览">×</button>
-      <Link href={`/posts/${post.slug}`}>
+      <Link href={postPath(post)}>
         <small><i />{post.categoryName}</small>
         <b>{post.title}</b>
         <p>{post.excerpt}</p>

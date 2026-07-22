@@ -11,6 +11,7 @@ export const categories = sqliteTable("categories", {
 
 export const posts = sqliteTable("posts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  publicId: text("public_id").notNull(),
   title: text("title").notNull(),
   slug: text("slug").notNull(),
   excerpt: text("excerpt").notNull().default(""),
@@ -23,6 +24,7 @@ export const posts = sqliteTable("posts", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
+  uniqueIndex("posts_public_id_uidx").on(table.publicId),
   uniqueIndex("posts_slug_uidx").on(table.slug),
   index("posts_status_published_idx").on(table.status, table.publishedAt),
   index("posts_archive_cursor_idx").on(table.status, table.publishedAt, table.id),
@@ -30,6 +32,16 @@ export const posts = sqliteTable("posts", {
   index("posts_category_archive_cursor_idx").on(table.categoryId, table.status, table.publishedAt, table.id),
   index("posts_updated_idx").on(table.updatedAt),
   index("posts_admin_cursor_idx").on(table.updatedAt, table.id),
+]);
+
+export const postSlugHistory = sqliteTable("post_slug_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  postId: integer("post_id").notNull(),
+  slug: text("slug").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("post_slug_history_slug_uidx").on(table.slug),
+  index("post_slug_history_post_idx").on(table.postId),
 ]);
 
 export const siteSettings = sqliteTable("site_settings", {

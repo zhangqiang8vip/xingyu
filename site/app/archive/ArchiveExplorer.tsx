@@ -119,7 +119,7 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
 
     {groups.map(([year, posts]) => <section className="archive-year" key={year}>
       <header><b>{year}</b><span>{posts.length} 篇</span></header>
-      <div>{posts.map((post) => <ModalPostLink id={`archive-post-${post.id}`} data-archive-post className="archive-row" slug={post.slug} key={post.id}>
+      <div>{posts.map((post) => <ModalPostLink id={`archive-post-${post.id}`} data-archive-post className="archive-row" publicId={post.publicId} slug={post.slug} key={post.id}>
         <time>{formatMonthDay(post.publishedAt)}</time>
         <div><span style={{ color: post.categoryColor ?? undefined }}>{post.categoryName}</span><h2>{post.title}</h2><p>{post.excerpt}</p></div><b>↗</b>
       </ModalPostLink>)}</div>

@@ -27,7 +27,7 @@ export default async function Home({ searchParams }: { searchParams: PageSearchP
 
   return (
     <main>
-      <SiteNavigation brandName={settings.brandName}>
+      <SiteNavigation brandName={settings.brandName} current="home">
         <NavTitleChrome targetId="home-hero-title" lead={settings.heroLead} tail={settings.heroTail} returnLabel="返回首页顶部" />
         <IslandSearch initialText={`${settings.heroLead}${settings.heroTail}`} />
       </SiteNavigation>
@@ -55,7 +55,7 @@ export default async function Home({ searchParams }: { searchParams: PageSearchP
         <div className="category-tabs home-category-tabs" aria-label="文章分类">
           <StableLink className={category === "all" ? "active" : ""} href="/">全部</StableLink>
           {selectedCategory && <StableLink className="active" href={`/?category=${selectedCategory.slug}`}><i style={{ background:selectedCategory.color }} />{selectedCategory.name}</StableLink>}
-          <details className="archive-category-menu home-category-menu">
+          <details className="archive-category-menu home-category-menu" data-dismiss-outside>
             <summary><span>分类</span><b>{categories.length}</b><i>⌄</i></summary>
             <div>
               <header><span>浏览分类</span><b>{categories.length} 个</b></header>
@@ -69,7 +69,7 @@ export default async function Home({ searchParams }: { searchParams: PageSearchP
         ) : (
           <div className="post-grid">
             {featured && (
-              <ModalPostLink className="post-card featured" slug={featured.slug}>
+              <ModalPostLink className="post-card featured" publicId={featured.publicId} slug={featured.slug}>
                 <div className="card-copy">
                   <span className="post-category" style={{ color: featured.categoryColor ?? undefined }}>{featured.categoryName}</span>
                   <h3>{featured.title}</h3><p>{featured.excerpt}</p>
@@ -79,7 +79,7 @@ export default async function Home({ searchParams }: { searchParams: PageSearchP
               </ModalPostLink>
             )}
             {rest.map((post, index) => (
-              <ModalPostLink className={`post-card ${index % 3 === 1 ? "dark" : ""}`} slug={post.slug} key={post.id}>
+              <ModalPostLink className={`post-card ${index % 3 === 1 ? "dark" : ""}`} publicId={post.publicId} slug={post.slug} key={post.id}>
                 <div className="card-copy">
                   <span className="post-category" style={{ color: post.categoryColor ?? undefined }}>{post.categoryName}</span>
                   <h3>{post.title}</h3><p>{post.excerpt}</p>

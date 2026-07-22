@@ -28,7 +28,7 @@ export default function RouteTransition({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Warm the optional animation after first paint without delaying page content.
-    const preload = () => { if (localStorage.getItem("xingyu-motion-mode") !== "static") void loadFlipBook(); };
+    const preload = () => { if (document.documentElement.dataset.motionMode !== "static") void loadFlipBook(); };
     const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void) => number; cancelIdleCallback?: (id: number) => void };
     if (idleWindow.requestIdleCallback) {
       const id = idleWindow.requestIdleCallback(preload);
@@ -227,33 +227,14 @@ function PageFlipOverlay({ state, onComplete }: { state:FlipState; onComplete:()
 function extractSnapshot(html: string) {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   parsed.querySelectorAll("script, .reader-modal").forEach((node) => node.remove());
-  syncPersistedControls(parsed);
   const root = parsed.querySelector(".route-transition-content");
   return root?.innerHTML ?? parsed.querySelector("main")?.outerHTML ?? null;
 }
 
-function syncPersistedControls(parsed: Document) {
-  const readingMode = localStorage.getItem("xingyu-reading-mode") === "page" ? "page" : "modal";
-  parsed.querySelectorAll<HTMLElement>(".reading-mode-button").forEach((button) => {
-    const icon = button.querySelector("i");
-    const label = button.querySelector("span");
-    if (icon) icon.textContent = readingMode === "page" ? "↗" : "▣";
-    if (label) label.textContent = readingMode === "page" ? "跳转" : "弹窗";
-  });
-
-  const savedMotion = localStorage.getItem("xingyu-motion-mode");
-  const motionMode = savedMotion === "static" || savedMotion === "flip"
-    ? savedMotion
-    : window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "static" : "flip";
-  parsed.querySelectorAll<HTMLElement>(".motion-mode-button").forEach((button) => {
-    button.classList.remove("flip", "static");
-    button.classList.add(motionMode);
-    const label = button.querySelector("span");
-    if (label) label.textContent = motionMode === "flip" ? "动效" : "静态";
-  });
-}
-
 function motionEnabled() {
+  const active = document.documentElement.dataset.motionMode;
+  if (active === "flip") return true;
+  if (active === "static") return false;
   const saved = localStorage.getItem("xingyu-motion-mode");
   if (saved === "flip") return true;
   if (saved === "static") return false;

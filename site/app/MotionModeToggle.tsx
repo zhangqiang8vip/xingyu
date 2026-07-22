@@ -12,21 +12,23 @@ export default function MotionModeToggle() {
   }, []);
   const subscribe = useCallback((notify: () => void) => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    media.addEventListener("change", notify);
-    window.addEventListener("storage", notify);
-    window.addEventListener("xingyu:motion-change", notify);
-    return () => { media.removeEventListener("change", notify); window.removeEventListener("storage", notify); window.removeEventListener("xingyu:motion-change", notify); };
-  }, []);
+    const sync = () => { document.documentElement.dataset.motionMode = getSnapshot(); notify(); };
+    media.addEventListener("change", sync);
+    window.addEventListener("storage", sync);
+    window.addEventListener("xingyu:motion-change", sync);
+    return () => { media.removeEventListener("change", sync); window.removeEventListener("storage", sync); window.removeEventListener("xingyu:motion-change", sync); };
+  }, [getSnapshot]);
   const mode = useSyncExternalStore(subscribe, getSnapshot, () => "flip");
   const select = () => {
     const next: MotionMode = mode === "flip" ? "static" : "flip";
+    document.documentElement.dataset.motionMode = next;
     localStorage.setItem("xingyu-motion-mode", next);
     window.dispatchEvent(new CustomEvent("xingyu:motion-change", { detail:next }));
     navigator.vibrate?.(8);
   };
   const currentLabel = mode === "flip" ? "动效" : "静态";
   const nextLabel = mode === "flip" ? "静态切换" : "翻页动效";
-  return <button className={`motion-mode-button ${mode}`} type="button" onClick={select} aria-label={`当前${currentLabel}，点击切换为${nextLabel}`} title={`切换为${nextLabel}`}>
-    <i aria-hidden="true" /><span>{currentLabel}</span>
+  return <button className="motion-mode-button" type="button" onClick={select} aria-label={`当前${currentLabel}，点击切换为${nextLabel}`} title={`切换为${nextLabel}`}>
+    <i aria-hidden="true" /><span className="motion-flip">动效</span><span className="motion-static">静态</span>
   </button>;
 }

@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import ArticleEndMark from "./ArticleEndMark";
+import IslandSearch from "./IslandSearch";
 import { formatLongDate, isEditableTarget } from "./content-utils";
+import { postPath } from "./post-path";
 
 type ReaderPost = {
+  publicId: string;
   title: string;
   slug: string;
   excerpt: string;
@@ -23,11 +27,11 @@ type ReaderResponse = {
   previousPost: ReaderNeighbor | null;
   nextPost: ReaderNeighbor | null;
 };
-type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & { slug: string };
+type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & { publicId: string; slug: string };
 
-export default function ModalPostLink({ slug, children, onClick, ...props }: Props) {
+export default function ModalPostLink({ publicId, slug, children, onClick, ...props }: Props) {
   const [open, setOpen] = useState(false);
-  const [activeSlug, setActiveSlug] = useState(slug);
+  const [activePublicId, setActivePublicId] = useState(publicId);
   const [post, setPost] = useState<ReaderPost | null>(null);
   const [previousPost, setPreviousPost] = useState<ReaderNeighbor | null>(null);
   const [nextPost, setNextPost] = useState<ReaderNeighbor | null>(null);
@@ -86,7 +90,7 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    fetch(`/api/reader/${encodeURIComponent(activeSlug)}`, { signal: controller.signal })
+    fetch(`/api/reader/${encodeURIComponent(activePublicId)}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("读取失败");
         const data = await response.json() as ReaderResponse;
@@ -99,7 +103,7 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
         if (!(nextError instanceof DOMException && nextError.name === "AbortError")) setError("文章暂时无法打开，请稍后再试。");
       });
     return () => controller.abort();
-  }, [activeSlug, open]);
+  }, [activePublicId, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -132,6 +136,25 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !post) return;
+    const timer = window.setTimeout(() => {
+      const storageKey = "xingyu-reader-id";
+      let visitor = localStorage.getItem(storageKey);
+      if (!visitor) {
+        visitor = crypto.randomUUID();
+        localStorage.setItem(storageKey, visitor);
+      }
+      void fetch(`/api/views/${encodeURIComponent(post.publicId)}`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ visitor }),
+        keepalive:true,
+      });
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [open, post]);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -225,10 +248,10 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
   const openReader = (event: React.MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event);
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if (localStorage.getItem("xingyu-reading-mode") === "page") return;
+    if (document.documentElement.dataset.readingMode === "page") return;
     event.preventDefault();
     resetReaderState();
-    setActiveSlug(slug);
+    setActivePublicId(publicId);
     setOpen(true);
   };
 
@@ -236,7 +259,7 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
     if (!neighbor) return;
     resetReaderState();
     setTocOpen(false);
-    setActiveSlug(neighbor.slug);
+    setActivePublicId(neighbor.publicId);
   }, [resetReaderState]);
 
   useEffect(() => {
@@ -303,13 +326,14 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
   };
 
   return <>
-    <a {...props} href={`/posts/${slug}`} onClick={openReader}>{children}</a>
+    <a {...props} href={postPath({ publicId, slug })} onClick={openReader}>{children}</a>
     {open && <div className="reader-modal" role="dialog" aria-modal="true" aria-label={post?.title ?? "正在打开文章"} onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <div className="reader-layout" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
        <section className="reader-panel">
         <header className="reader-toolbar">
           <div><i /><span>沉浸阅读</span></div>
           {post && <button className="reader-toolbar-title" type="button" onClick={returnToTop} aria-label={`${post.title}，已阅读 ${Math.round(readingProgress * 100)}%，返回文章顶部`} title="返回文章顶部"><span>{post.title}</span><i>↑</i><b>{Math.round(readingProgress * 100)}%</b></button>}
+          {post && <IslandSearch variant="reader" initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); setActivePublicId(result.publicId); }} />}
           <button className="reader-toolbar-close" type="button" onClick={() => setOpen(false)} autoFocus aria-label="关闭阅读弹窗">×</button>
           <span className="reader-toolbar-progress" style={{ "--reader-progress": readingProgress } as React.CSSProperties} aria-hidden="true" />
         </header>
@@ -323,7 +347,7 @@ export default function ModalPostLink({ slug, children, onClick, ...props }: Pro
           {tocItems.length > 0 && <button className={`reader-toc-toggle ${tocVisible ? "visible" : ""}`} type="button" onClick={() => setTocOpen((value) => !value)} aria-label="打开文章目录" aria-expanded={tocOpen}>目录</button>}
           <div className="reader-scroll" ref={scrollRef}>
             <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt)}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span></div></header>
-            <article className="reader-prose markdown-body" ref={articleRef}><ReactMarkdown remarkPlugins={[remarkGfm]}>{post.content}</ReactMarkdown><div className="end-mark">···</div></article>
+            <article className="reader-prose markdown-body" ref={articleRef}><ReactMarkdown remarkPlugins={[remarkGfm]}>{post.content}</ReactMarkdown><ArticleEndMark /></article>
             <section className="reader-neighbors" aria-label="上一篇和下一篇">
               <header><small>KEEP READING</small><h2>继续阅读</h2></header>
               <div>

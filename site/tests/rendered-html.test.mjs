@@ -33,9 +33,25 @@ test("development and production content stay on isolated databases", async () =
   assert.match(packageJson, /dev:production/);
 });
 
+test("article routes use stable public ids and retain historical slugs", async () => {
+  const [schema, bootstrap, createRoute, updateRoute, legacyPage, stablePage, pathHelper] = await Promise.all([
+    source("db/schema.ts"), source("db/bootstrap.ts"), source("app/api/posts/route.ts"),
+    source("app/api/posts/[id]/route.ts"), source("app/posts/[slug]/page.tsx"),
+    source("app/posts/[slug]/[canonicalSlug]/page.tsx"), source("app/post-path.ts"),
+  ]);
+  assert.match(schema, /publicId: text\("public_id"\)/);
+  assert.match(schema, /postSlugHistory/);
+  assert.match(bootstrap, /postsWithoutPublicId/);
+  assert.match(createRoute, /createPostPublicId\(\)/);
+  assert.match(updateRoute, /insert\(postSlugHistory\)/);
+  assert.match(legacyPage, /permanentRedirect\(postPath\(post\)\)/);
+  assert.match(stablePage, /canonicalSlug !== post\.slug/);
+  assert.match(pathHelper, /post\.publicId/);
+});
+
 test("public pages consume editable settings and shared presentation helpers", async () => {
   const [home, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
-    source("app/page.tsx"), source("app/about/page.tsx"), source("app/posts/[slug]/page.tsx"),
+    source("app/page.tsx"), source("app/about/page.tsx"), source("app/posts/PostPageView.tsx"),
     source("app/layout.tsx"), source("app/admin/AdminClient.tsx"), source("app/SiteNavigation.tsx"),
     source("app/content-utils.ts"),
   ]);
@@ -93,7 +109,7 @@ test("admin previews unsaved content through the real public pages", async () =>
     source("app/admin/AdminClient.tsx"), source("app/admin/AdminSettingsPanel.tsx"),
     source("app/admin/AdminPageEditor.tsx"), source("app/admin/ArticleWritingStudio.tsx"),
     source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
-    source("app/AdminPreviewBridge.tsx"), source("app/posts/[slug]/page.tsx"),
+    source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
   ]);
   assert.ok(admin.indexOf("首页设置") < admin.indexOf("文章管理"));
   assert.ok(admin.indexOf("文章管理") < admin.indexOf("关于设置"));

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { DEFAULT_ABOUT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
+import { createPostPublicId } from "./public-id";
 
 let ready: Promise<void> | null = null;
 
@@ -27,6 +28,7 @@ async function initialize() {
     )`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       slug TEXT NOT NULL UNIQUE,
       excerpt TEXT NOT NULL DEFAULT '',
@@ -74,6 +76,12 @@ async function initialize() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (post_id, visitor_hash, viewed_on)
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS post_slug_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS categories_slug_uidx ON categories(slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS posts_slug_uidx ON posts(slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS content_pages_slug_uidx ON content_pages(slug)"),
@@ -84,6 +92,7 @@ async function initialize() {
     d1.prepare("CREATE INDEX IF NOT EXISTS posts_updated_idx ON posts(updated_at DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS posts_admin_cursor_idx ON posts(updated_at DESC, id DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS post_views_date_idx ON post_views(viewed_on)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS post_slug_history_post_idx ON post_slug_history(post_id)"),
     d1.prepare("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"),
     d1.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(title, excerpt, content, content='posts', content_rowid='id', tokenize='trigram')"),
     d1.prepare(`CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
@@ -97,6 +106,17 @@ async function initialize() {
       INSERT INTO posts_fts(rowid, title, excerpt, content) VALUES (new.id, new.title, new.excerpt, new.content);
     END`),
   ]);
+
+  const postColumns = await d1.prepare("PRAGMA table_info(posts)").all<{ name: string }>();
+  if (!(postColumns.results ?? []).some((column) => column.name === "public_id")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN public_id TEXT").run();
+  }
+  const postsWithoutPublicId = await d1.prepare("SELECT id FROM posts WHERE public_id IS NULL OR public_id = ''").all<{ id: number }>();
+  if (postsWithoutPublicId.results?.length) {
+    await d1.batch(postsWithoutPublicId.results.map((post) => d1.prepare("UPDATE posts SET public_id = ? WHERE id = ?").bind(createPostPublicId(), post.id)));
+  }
+  await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS posts_public_id_uidx ON posts(public_id)").run();
+  await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS post_slug_history_slug_uidx ON post_slug_history(slug)").run();
 
   const storedEnvironment = await d1.prepare("SELECT value FROM app_meta WHERE key = 'app_environment'")
     .first<{ value: string }>();

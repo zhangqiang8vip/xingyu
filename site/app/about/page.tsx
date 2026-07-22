@@ -18,7 +18,7 @@ export default async function AboutPage({searchParams}:{searchParams:PageSearchP
   if(!page)return null;
   const split=splitTitle(page.title);
   return <main className="about-page">
-    <SiteNavigation brandName={settings.brandName} aboutCurrent><NavTitleChrome targetId="about-hero-title" lead={split.lead} tail={split.tail} returnLabel="返回关于页顶部" /><IslandSearch initialText={page.title} /></SiteNavigation>
+    <SiteNavigation brandName={settings.brandName} current="about"><NavTitleChrome targetId="about-hero-title" lead={split.lead} tail={split.tail} returnLabel="返回关于页顶部" /><IslandSearch initialText={page.title} /></SiteNavigation>
 
     <section className="about-hero-page">
       <div className="about-hero-copy"><p data-preview-field="eyebrow">{page.eyebrow}</p><h1 id="about-hero-title"><i data-preview-field="titleLead">{split.lead}</i><span data-preview-field="titleTail">{split.tail}</span></h1><div className="about-intro"><i /><p data-preview-field="excerpt">{page.excerpt}</p></div></div>

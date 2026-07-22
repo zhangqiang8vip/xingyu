@@ -4,8 +4,8 @@ import type { PageSearchParams } from "../content-utils";
 import { CONTENT_LIMITS, copyrightText } from "../site-config";
 import StableLink from "../StableLink";
 import ArchiveExplorer from "./ArchiveExplorer";
-import IslandSearch from "../IslandSearch";
 import SiteNavigation from "../SiteNavigation";
+import ArchiveNavCenter from "./ArchiveNavCenter";
 
 export const dynamic = "force-dynamic";
 
@@ -29,16 +29,16 @@ export default async function ArchivePage({ searchParams }: { searchParams: Page
   };
 
   return <main className="archive-page">
-    <SiteNavigation brandName={settings.brandName}><IslandSearch initialText="全部文章" /></SiteNavigation>
+    <SiteNavigation brandName={settings.brandName} current="archive"><ArchiveNavCenter categories={categories} category={category} query={query} /></SiteNavigation>
     <section className="archive-hero">
       <p>ALL WRITING</p><h1>文章</h1><span>把时间交还给文章。按分类浏览，或搜索{settings.brandName}的全部内容。</span>
       <form className="archive-search" action="/archive" method="get"><input name="q" defaultValue={query} placeholder="搜索标题、摘要与正文" aria-label="搜索全部文章" />{category !== "all" && <input type="hidden" name="category" value={category} />}<button>搜索</button></form>
     </section>
     <section className="archive-shell" id="archive-list">
-      <div className="category-tabs archive-tabs">
+      <div className="category-tabs archive-tabs" id="archive-filter-source">
         <StableLink className={category === "all" ? "active" : ""} href={href({ category: "all" })}>全部</StableLink>
         {selectedCategory && <StableLink className="active archive-selected-category" href={href({ category:selectedCategory.slug })}><i style={{background:selectedCategory.color}} />{selectedCategory.name}</StableLink>}
-        <details className="archive-category-menu">
+        <details className="archive-category-menu" data-dismiss-outside>
           <summary><span>分类</span><b>{categories.length}</b><i>⌄</i></summary>
           <div>
             <header><span>浏览分类</span><b>{categories.length} 个</b></header>
