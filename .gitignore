@@ -1,0 +1,8 @@
+# Codex/local agent state
+/.agents/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.log
+

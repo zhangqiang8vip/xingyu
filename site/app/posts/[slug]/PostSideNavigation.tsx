@@ -1,0 +1,136 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { transitionTo } from "../../RouteTransition";
+import { formatLongDate, isEditableTarget } from "../../content-utils";
+
+type NeighborPost = {
+  slug: string;
+  title: string;
+  excerpt: string;
+  publishedAt: string | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+};
+
+type Direction = "previous" | "next";
+
+export default function PostSideNavigation({ previousPost, nextPost }: { previousPost: NeighborPost | null; nextPost: NeighborPost | null }) {
+  const router = useRouter();
+  const [visible, setVisible] = useState(false);
+  const [preview, setPreview] = useState<Direction | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
+  const rootRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (previousPost) router.prefetch(`/posts/${previousPost.slug}`);
+    if (nextPost) router.prefetch(`/posts/${nextPost.slug}`);
+  }, [nextPost, previousPost, router]);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const title = document.querySelector<HTMLElement>(".post-hero h1");
+      const nav = document.querySelector<HTMLElement>(".site-nav nav");
+      if (!title || !nav) return;
+      const nextVisible = title.getBoundingClientRect().top < nav.getBoundingClientRect().bottom + 56;
+      setVisible(nextVisible);
+      if (!nextVisible) setPreview(null);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setPreview(null);
+    };
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreview(null);
+        return;
+      }
+      if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isEditableTarget(event.target)) return;
+      const destination = event.key === "ArrowLeft" ? previousPost : event.key === "ArrowRight" ? nextPost : null;
+      if (!destination) return;
+      event.preventDefault();
+      document.documentElement.dataset.keyTurn = event.key === "ArrowLeft" ? "left" : "right";
+      if (keyFeedbackTimer.current) clearTimeout(keyFeedbackTimer.current);
+      keyFeedbackTimer.current = setTimeout(() => { delete document.documentElement.dataset.keyTurn; }, 180);
+      navigator.vibrate?.(12);
+      transitionTo(`/posts/${destination.slug}`, event.key === "ArrowLeft" ? "left" : "right");
+    };
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    document.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", handleKeyboard);
+    frame = requestAnimationFrame(update);
+    return () => {
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("keydown", handleKeyboard);
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      if (keyFeedbackTimer.current) clearTimeout(keyFeedbackTimer.current);
+      delete document.documentElement.dataset.keyTurn;
+      cancelAnimationFrame(frame);
+    };
+  }, [nextPost, previousPost]);
+
+  const beginLongPress = (event: ReactPointerEvent, direction: Direction) => {
+    if (event.pointerType === "mouse") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    longPressed.current = false;
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = setTimeout(() => {
+      longPressed.current = true;
+      setPreview(direction);
+      navigator.vibrate?.(12);
+    }, 460);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  };
+
+  const stopLongPressNavigation = (event: React.MouseEvent) => {
+    if (!longPressed.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    longPressed.current = false;
+  };
+
+  return <aside ref={rootRef} className={`post-side-navigation ${visible ? "visible" : ""}`} aria-label="上一篇和下一篇">
+    {previousPost && <SideItem direction="previous" post={previousPost} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
+    {nextPost && <SideItem direction="next" post={nextPost} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
+  </aside>;
+}
+
+function SideItem({ direction, post, preview, setPreview, beginLongPress, cancelLongPress, stopLongPressNavigation }: {
+  direction: Direction;
+  post: NeighborPost;
+  preview: Direction | null;
+  setPreview: (direction: Direction | null) => void;
+  beginLongPress: (event: ReactPointerEvent, direction: Direction) => void;
+  cancelLongPress: () => void;
+  stopLongPressNavigation: (event: React.MouseEvent) => void;
+}) {
+  const previous = direction === "previous";
+  const open = preview === direction;
+  return <div className={`post-side-item ${direction} ${open ? "previewing" : ""}`} onMouseEnter={() => setPreview(direction)} onMouseLeave={() => setPreview(null)} onFocus={() => setPreview(direction)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPreview(null); }}>
+    <Link className="post-side-trigger" href={`/posts/${post.slug}`} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
+      <i>{previous ? "←" : "→"}</i><span>{previous ? "上一篇" : "下一篇"}</span>
+    </Link>
+    {open && <div className="post-side-preview" style={{ "--preview-color": post.categoryColor ?? "#0071e3" } as React.CSSProperties}>
+      <button type="button" onClick={() => setPreview(null)} aria-label="关闭预览">×</button>
+      <Link href={`/posts/${post.slug}`}>
+        <small><i />{post.categoryName}</small>
+        <b>{post.title}</b>
+        <p>{post.excerpt}</p>
+        <footer><time>{formatLongDate(post.publishedAt)}</time><span>打开文章 ↗</span></footer>
+      </Link>
+    </div>}
+  </div>;
+}
