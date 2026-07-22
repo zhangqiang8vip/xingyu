@@ -21,6 +21,18 @@ test("content, settings and view data are persisted in D1", async () => {
   assert.match(viewRoute, /view_count = view_count \+ 1/);
 });
 
+test("development and production content stay on isolated databases", async () => {
+  const [viteConfig, bootstrap, packageJson] = await Promise.all([
+    source("vite.config.ts"), source("db/bootstrap.ts"), source("package.json"),
+  ]);
+  assert.match(viteConfig, /APP_ENV: appEnvironment/);
+  assert.match(viteConfig, /xingyu-development/);
+  assert.match(viteConfig, /xingyu-production-preview/);
+  assert.match(bootstrap, /app_environment/);
+  assert.doesNotMatch(bootstrap, /INSERT(?:\s+OR\s+\w+)?\s+INTO\s+posts\s*\(/i);
+  assert.match(packageJson, /dev:production/);
+});
+
 test("public pages consume editable settings and shared presentation helpers", async () => {
   const [home, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
     source("app/page.tsx"), source("app/about/page.tsx"), source("app/posts/[slug]/page.tsx"),

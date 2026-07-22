@@ -15,6 +15,7 @@ export function ensureDatabase() {
 async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
+  const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
 
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS categories (
@@ -96,6 +97,14 @@ async function initialize() {
       INSERT INTO posts_fts(rowid, title, excerpt, content) VALUES (new.id, new.title, new.excerpt, new.content);
     END`),
   ]);
+
+  const storedEnvironment = await d1.prepare("SELECT value FROM app_meta WHERE key = 'app_environment'")
+    .first<{ value: string }>();
+  if (storedEnvironment && storedEnvironment.value !== runtimeEnvironment) {
+    throw new Error(`D1 environment mismatch: expected ${runtimeEnvironment}, found ${storedEnvironment.value}`);
+  }
+  await d1.prepare("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('app_environment', ?)")
+    .bind(runtimeEnvironment).run();
 
   const s = DEFAULT_SITE_SETTINGS;
   const p = DEFAULT_ABOUT_PAGE;

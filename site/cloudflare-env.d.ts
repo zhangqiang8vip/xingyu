@@ -1,4 +1,5 @@
 interface Env {
+  APP_ENV: "development" | "production";
   ASSETS: Fetcher;
   DB: D1Database;
   MEDIA: R2Bucket;
@@ -13,6 +14,7 @@ interface Env {
 
 declare namespace Cloudflare {
   interface Env {
+    APP_ENV: "development" | "production";
     DB: D1Database;
     MEDIA: R2Bucket;
   }
