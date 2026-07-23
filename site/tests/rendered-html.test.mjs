@@ -88,6 +88,8 @@ test("remote MCP separates read approvals from important writes and records rece
     source("db/mcp-activity.ts"),
   ]);
   assert.match(mcp, /server\.registerTool\("list_mcp_activity"/);
+  assert.match(mcp, /server\.registerTool\("get_page"/);
+  assert.match(mcp, /server\.registerTool\("update_page"/);
   assert.match(mcp, /change_summary: CHANGE_SUMMARY_SCHEMA/);
   assert.match(mcp, /destructiveHint: true, idempotentHint: true, openWorldHint: true/);
   assert.match(mcp, /activityReceipt\("publish_post"/);
@@ -95,6 +97,7 @@ test("remote MCP separates read approvals from important writes and records rece
   assert.match(schema, /mcpActivity = sqliteTable\("mcp_activity"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS mcp_activity/);
   assert.match(activity, /recordMcpActivity/);
+  assert.match(activity, /recordMcpPageActivity/);
   assert.match(activity, /listMcpActivity/);
 });
 
@@ -130,9 +133,10 @@ test("admin previews unsaved content through the real public pages", async () =>
     source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
   ]);
   assert.ok(admin.indexOf("首页设置") < admin.indexOf("文章管理"));
-  assert.ok(admin.indexOf("文章管理") < admin.indexOf("关于设置"));
+  assert.ok(admin.indexOf("文章管理") < admin.indexOf("接入设置"));
+  assert.ok(admin.indexOf("接入设置") < admin.indexOf("关于设置"));
   assert.match(homeSettings, /HomeLivePreview settings=\{form\}/);
-  assert.match(aboutEditor, /AboutLivePreview page=\{form\}/);
+  assert.match(aboutEditor, /ContentPageLivePreview page=\{form\}/);
   assert.match(admin, /setStudio\("reading"\)/);
   assert.match(admin, /setStudio\("split"\)/);
   assert.match(studio, /type Mode="code"\|"split"\|"reading"/);
@@ -140,7 +144,8 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(studio, /adminPreview=article/);
   assert.match(studio, /admin\/article-preview/);
   assert.match(livePreview, /src="\/\?adminPreview=home"/);
-  assert.match(livePreview, /src="\/about\?adminPreview=about"/);
+  assert.match(livePreview, /kind==="about"/);
+  assert.match(livePreview, /kind:\s*"about"\|"connect"/);
   assert.match(bridge, /createPortal/);
   assert.match(bridge, /ReactMarkdown/);
   assert.match(postPage, /AdminPreviewBridge kind="article"/);

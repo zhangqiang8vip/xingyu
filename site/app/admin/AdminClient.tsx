@@ -29,8 +29,8 @@ function toLocalDateTime(value?:string|null){
   return local.toISOString().slice(0,16);
 }
 
-export default function AdminClient({ categories:initialCategories, settings, aboutPage, stats:initialStats, userName, signOutPath }: { categories: Category[]; settings:SiteSettingsForm; aboutPage:EditablePage; stats:Stats; userName: string; signOutPath: string }) {
-  const [section,setSection]=useState<"home"|"articles"|"page"|"categories">("home");
+export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, userName, signOutPath }: { categories: Category[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:Stats; userName: string; signOutPath: string }) {
+  const [section,setSection]=useState<"home"|"articles"|"connect"|"about"|"categories">("home");
   const [categories,setCategories]=useState(initialCategories);
   const [posts, setPosts] = useState<Post[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -126,7 +126,7 @@ export default function AdminClient({ categories:initialCategories, settings, ab
     <main className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-sidebar-top"><Link className="brand admin-brand" href="/">{settings.brandName}<span>。</span></Link><div className="admin-mobile-actions"><Link href="/" target="_blank" aria-label="查看前台">↗</Link><button type="button" onClick={signOut} aria-label="安全退出">⏻</button></div><ThemeToggle /></div>
-        <nav><button className={section==="home"?"selected":""} onClick={()=>setSection("home")}><span>首页设置</span><b>01</b></button><button className={section==="articles"?"selected":""} onClick={()=>setSection("articles")}><span>文章管理</span><b>{stats.total}</b></button><button className={section==="page"?"selected":""} onClick={()=>setSection("page")}><span>关于设置</span><b>03</b></button><button className={section==="categories"?"selected":""} onClick={()=>setSection("categories")}><span>分类管理</span><b>{categories.length}</b></button><Link className="admin-desktop-utility" href="/" target="_blank">查看前台 ↗</Link><button className="admin-desktop-utility" onClick={signOut}>安全退出 <b>↗</b></button></nav>
+        <nav><button className={section==="home"?"selected":""} onClick={()=>setSection("home")}><span>首页设置</span><b>01</b></button><button className={section==="articles"?"selected":""} onClick={()=>setSection("articles")}><span>文章管理</span><b>{stats.total}</b></button><button className={section==="connect"?"selected":""} onClick={()=>setSection("connect")}><span>接入设置</span><b>03</b></button><button className={section==="about"?"selected":""} onClick={()=>setSection("about")}><span>关于设置</span><b>04</b></button><button className={section==="categories"?"selected":""} onClick={()=>setSection("categories")}><span>分类管理</span><b>{categories.length}</b></button><Link className="admin-desktop-utility" href="/" target="_blank">查看前台 ↗</Link><button className="admin-desktop-utility" onClick={signOut}>安全退出 <b>↗</b></button></nav>
         <div className="admin-user"><img src={settings.avatarUrl} alt={`${settings.authorName}管理员`} /><div><b>{userName}</b><small>管理员</small></div></div>
       </aside>
 
@@ -145,7 +145,7 @@ export default function AdminClient({ categories:initialCategories, settings, ab
             ))}</tbody></table>
         </div>
         <div className="table-footer"><span>游标分页 · 第 {cursorStack.length + 1} 批{posts.length ? ` · 当前 ${posts.length} 篇` : ""}</span><div><button disabled={cursorStack.length === 0} onClick={previousBatch}>←</button><button disabled={!nextCursor} onClick={nextBatch}>→</button></div></div>
-      </section> : section==="page" ? <AdminPageEditor initial={aboutPage} settings={settings} /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
+      </section> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
 
       {form && <div className="editor-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setForm(null)}><form className="editor-panel" onSubmit={save} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") e.currentTarget.requestSubmit(); }}>
         <header className="editor-header">

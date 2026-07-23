@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type PreviewKind = "home" | "about" | "article";
+type PreviewKind = "home" | "about" | "connect" | "article";
 type PreviewPayload = Record<string, string | number>;
 
 /**
@@ -21,7 +21,7 @@ export default function AdminPreviewBridge({ kind }: { kind: PreviewKind }) {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type !== "xingyu:admin-preview" || event.data?.kind !== kind) return;
       const nextPayload = event.data.payload ?? {};
-      if ((kind === "about" || kind === "article") && typeof nextPayload.content === "string") {
+      if ((kind === "about" || kind === "connect" || kind === "article") && typeof nextPayload.content === "string") {
         const target = document.querySelector("[data-preview-markdown='content']");
         if (target !== markdownTarget) {
           target?.replaceChildren();

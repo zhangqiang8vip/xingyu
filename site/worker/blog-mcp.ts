@@ -5,10 +5,10 @@ import { z } from "zod";
 import { slugify, type PostPayload } from "../app/api/posts/post-input";
 import { getDb } from "../db";
 import { ensureDatabase } from "../db/bootstrap";
-import { listMcpActivity, recordMcpActivity, type McpActivityAction } from "../db/mcp-activity";
+import { listMcpActivity, recordMcpActivity, recordMcpPageActivity, type McpActivityAction } from "../db/mcp-activity";
 import { createPostRecord, getWritablePost, PostWriteError, updatePostRecord } from "../db/post-write";
-import { listAdminPosts } from "../db/queries";
-import { categories } from "../db/schema";
+import { getContentPage, listAdminPosts } from "../db/queries";
+import { categories, contentPages } from "../db/schema";
 
 const MCP_PATH = "/mcp";
 const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)
@@ -52,6 +52,20 @@ async function recordActivitySafely(input: Parameters<typeof recordMcpActivity>[
       event: "mcp_activity_write_failed",
       action: input.action,
       publicId: input.post.publicId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+}
+
+async function recordPageActivitySafely(input: Parameters<typeof recordMcpPageActivity>[0]) {
+  try {
+    return await recordMcpPageActivity(input);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "mcp_page_activity_write_failed",
+      action: "update_page",
+      slug: input.slug,
       error: error instanceof Error ? error.message : String(error),
     }));
     return null;
@@ -123,6 +137,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         "这是星屿博客的线上写作 MCP。默认先用 create_draft 创建草稿；只有用户明确要求上线时才调用 publish_post。",
         "修改前先用 get_post 读取最新版，稳定 public_id 是首选标识。正文使用 Markdown。",
         "不要假设分类存在，必要时先调用 list_categories。update_post 不改变发布状态；发布和撤回分别使用独立工具。",
+        "独立页面先用 get_page 读取；update_page 会立即改变公开页面，必须先展示变更字段和摘要并获得用户确认。",
         "调用任何写入工具前，先向用户说明文章标题、当前状态、将修改的字段与 change_summary；不要替用户默许发布或撤回。",
       ].join(" "),
     },
@@ -216,6 +231,105 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
           updated_at: post.updatedAt,
           public_url: post.status === "published" ? publicPostUrl(origin, post) : null,
         },
+      });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
+  server.registerTool("get_page", {
+    title: "读取独立页面",
+    description: "读取星屿的接入页或关于页，包括独立标题、摘要和完整 Markdown。修改页面前应先调用。",
+    inputSchema: {
+      slug: z.enum(["connect", "about"]).describe("页面标识：connect 为接入页，about 为关于页"),
+    },
+    outputSchema: { ok: z.boolean(), page: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ slug }) => {
+    try {
+      const page = await getContentPage(slug);
+      if (!page) throw new PostWriteError("页面不存在", 404);
+      return toolResult({
+        ok: true,
+        page: {
+          slug: page.slug,
+          eyebrow: page.eyebrow,
+          title: page.title,
+          excerpt: page.excerpt,
+          content_markdown: page.content,
+          updated_at: page.updatedAt,
+          public_url: `${origin}/${page.slug}`,
+        },
+      });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
+  server.registerTool("update_page", {
+    title: "更新公开页面",
+    description: "在用户确认后更新接入页或关于页。页面始终公开，因此保存会立即改变线上内容并记录回执。",
+    inputSchema: {
+      slug: z.enum(["connect", "about"]).describe("页面标识：connect 为接入页，about 为关于页"),
+      eyebrow: z.string().trim().max(120).optional(),
+      title: z.string().trim().min(1).max(200).optional(),
+      excerpt: z.string().max(1_000).optional(),
+      content_markdown: z.string().max(750_000).optional(),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("更新公开页面"),
+    },
+    outputSchema: {
+      ok: z.boolean(),
+      page: z.record(z.string(), z.unknown()).optional(),
+      receipt: RECEIPT_OUTPUT_SCHEMA.optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, async ({ slug, eyebrow, title, excerpt, content_markdown, change_summary }) => {
+    try {
+      const current = await getContentPage(slug);
+      if (!current) throw new PostWriteError("页面不存在", 404);
+      const next = {
+        eyebrow: eyebrow ?? current.eyebrow,
+        title: title ?? current.title,
+        excerpt: excerpt ?? current.excerpt,
+        content: content_markdown ?? current.content,
+      };
+      const changedFields = [
+        current.eyebrow !== next.eyebrow ? "eyebrow" : null,
+        current.title !== next.title ? "title" : null,
+        current.excerpt !== next.excerpt ? "excerpt" : null,
+        current.content !== next.content ? "content_markdown" : null,
+      ].filter((field): field is string => field !== null);
+      if (!changedFields.length) {
+        return toolResult({
+          ok: true,
+          page: { slug: current.slug, title: current.title, public_url: `${origin}/${current.slug}` },
+          receipt: {
+            action: "update_page",
+            activity_id: null,
+            summary: "没有检测到内容变化，未执行写入。",
+            changed_fields: [],
+            recorded_at: null,
+          },
+        });
+      }
+      const updatedAt = new Date().toISOString();
+      await ensureDatabase();
+      await getDb().insert(contentPages).values({ slug, ...next, updatedAt }).onConflictDoUpdate({
+        target: contentPages.slug,
+        set: { ...next, updatedAt },
+      });
+      const activity = await recordPageActivitySafely({
+        slug,
+        title: next.title,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      });
+      return toolResult({
+        ok: true,
+        page: { slug, title: next.title, updated_at: updatedAt, public_url: `${origin}/${slug}` },
+        receipt: activityReceipt("update_page", activity, change_summary, changedFields),
       });
     } catch (error) {
       return toolFailure(error);

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { DEFAULT_ABOUT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
+import { DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
 import { createPostPublicId } from "./public-id";
 
 let ready: Promise<void> | null = null;
@@ -166,6 +166,7 @@ async function initialize() {
 
   const s = DEFAULT_SITE_SETTINGS;
   const p = DEFAULT_ABOUT_PAGE;
+  const connect = DEFAULT_CONNECT_PAGE;
   await d1.batch([
     d1.prepare("INSERT OR IGNORE INTO categories (id, name, slug, color) VALUES (1, '随笔', 'notes', '#8E8E93')"),
     d1.prepare(`UPDATE categories
@@ -189,6 +190,8 @@ async function initialize() {
       ),
     d1.prepare("INSERT OR IGNORE INTO content_pages (slug, eyebrow, title, excerpt, content) VALUES (?, ?, ?, ?, ?)")
       .bind(p.slug, p.eyebrow, p.title, p.excerpt, p.content),
+    d1.prepare("INSERT OR IGNORE INTO content_pages (slug, eyebrow, title, excerpt, content) VALUES (?, ?, ?, ?, ?)")
+      .bind(connect.slug, connect.eyebrow, connect.title, connect.excerpt, connect.content),
   ]);
 
   const searchVersion = await d1.prepare("SELECT value FROM app_meta WHERE key = 'posts_fts_version'").first<{ value: string }>();

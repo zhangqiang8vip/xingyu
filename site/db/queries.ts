@@ -4,7 +4,7 @@ import { cache } from "react";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
-import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
+import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
 
 export type PostFilters = {
   page?: number;
@@ -77,7 +77,8 @@ export const getSiteSettings = cache(async function getSiteSettings() {
 export async function getContentPage(slug: string) {
   await ensureDatabase();
   const rows = await getDb().select().from(contentPages).where(eq(contentPages.slug, slug)).limit(1);
-  return rows[0] ?? (slug === "about" ? { id: 0, ...DEFAULT_ABOUT_PAGE, updatedAt: new Date(0).toISOString() } : null);
+  const fallback = slug === "about" ? DEFAULT_ABOUT_PAGE : slug === "connect" ? DEFAULT_CONNECT_PAGE : null;
+  return rows[0] ?? (fallback ? { id: 0, ...fallback, updatedAt: new Date(0).toISOString() } : null);
 }
 
 export async function getAdminStats() {

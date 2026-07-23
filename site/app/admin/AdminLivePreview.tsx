@@ -9,13 +9,14 @@ export function HomeLivePreview({ settings,onClose }:{settings:SiteSettingsForm;
   return <RealPagePreview label="首页即时预览" kind="home" src="/?adminPreview=home" payload={payload} onClose={onClose}/>;
 }
 
-export function AboutLivePreview({ page,settings,onClose }:{page:EditablePage;settings:SiteSettingsForm;onClose:()=>void}){
+export function ContentPageLivePreview({ page,settings,kind,onClose }:{page:EditablePage;settings:SiteSettingsForm;kind:"about"|"connect";onClose:()=>void}){
   const [titleLead,titleTail]=splitTitle(page.title);
   const payload={...settings,...page,titleLead,titleTail,authorIdentity:`${settings.authorName} · ${settings.brandLatin}`,footerCopyright:`© ${new Date().getFullYear()} ${settings.brandName} · ${settings.footerText}`};
-  return <RealPagePreview label="关于页即时预览" kind="about" src="/about?adminPreview=about" payload={payload} onClose={onClose}/>;
+  const label=kind==="about"?"关于页即时预览":"接入页即时预览";
+  return <RealPagePreview label={label} kind={kind} src={`/${kind}?adminPreview=${kind}`} payload={payload} onClose={onClose}/>;
 }
 
-function RealPagePreview({label,kind,src,payload,onClose}:{label:string;kind:"home"|"about";src:string;payload:object;onClose:()=>void}){
+function RealPagePreview({label,kind,src,payload,onClose}:{label:string;kind:"home"|"about"|"connect";src:string;payload:object;onClose:()=>void}){
   const frame=useRef<HTMLIFrameElement>(null);
   usePreviewEscape(onClose);
   const sync=useCallback(()=>frame.current?.contentWindow?.postMessage({type:"xingyu:admin-preview",kind,payload},window.location.origin),[kind,payload]);
