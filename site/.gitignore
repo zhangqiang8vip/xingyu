@@ -42,7 +42,9 @@ self-test-*.log
 next-env.d.ts
 *.tsbuildinfo
 /dist/
-/build/
+# Keep source under build/ (e.g. sites-vite-plugin.ts); only ignore other build artifacts if added later.
+/build/*
+!/build/sites-vite-plugin.ts
 /.wrangler/
 /outputs/
 /work/
