@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { transitionTo } from "../../RouteTransition";
 import { formatLongDate, isEditableTarget } from "../../content-utils";
+import ModalPostLink from "../../ModalPostLink";
 import { postPath } from "../../post-path";
 
 type NeighborPost = {
@@ -39,8 +38,10 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
       frame = 0;
       const title = document.querySelector<HTMLElement>(".post-hero h1");
       const nav = document.querySelector<HTMLElement>(".site-nav nav");
+      const endSection = document.querySelector<HTMLElement>(".post-page .post-end");
       if (!title || !nav) return;
-      const nextVisible = title.getBoundingClientRect().top < nav.getBoundingClientRect().bottom + 56;
+      const beforeContinuation = !endSection || endSection.getBoundingClientRect().top > window.innerHeight - 96;
+      const nextVisible = title.getBoundingClientRect().top < nav.getBoundingClientRect().bottom + 56 && beforeContinuation;
       setVisible(nextVisible);
       if (!nextVisible) setPreview(null);
     };
@@ -61,7 +62,7 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
       if (keyFeedbackTimer.current) clearTimeout(keyFeedbackTimer.current);
       keyFeedbackTimer.current = setTimeout(() => { delete document.documentElement.dataset.keyTurn; }, 180);
       navigator.vibrate?.(12);
-      transitionTo(postPath(destination), event.key === "ArrowLeft" ? "left" : "right");
+      rootRef.current?.querySelector<HTMLAnchorElement>(`.post-side-item.${event.key === "ArrowLeft" ? "previous" : "next"} .post-side-trigger`)?.click();
     };
     window.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
@@ -122,17 +123,17 @@ function SideItem({ direction, post, preview, setPreview, beginLongPress, cancel
   const previous = direction === "previous";
   const open = preview === direction;
   return <div className={`post-side-item ${direction} ${open ? "previewing" : ""}`} onMouseEnter={() => setPreview(direction)} onMouseLeave={() => setPreview(null)} onFocus={() => setPreview(direction)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPreview(null); }}>
-    <Link className="post-side-trigger" href={postPath(post)} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
+    <ModalPostLink className="post-side-trigger" publicId={post.publicId} slug={post.slug} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
       <i>{previous ? "←" : "→"}</i><span>{previous ? "上一篇" : "下一篇"}</span>
-    </Link>
+    </ModalPostLink>
     {open && <div className="post-side-preview" style={{ "--preview-color": post.categoryColor ?? "#0071e3" } as React.CSSProperties}>
       <button type="button" onClick={() => setPreview(null)} aria-label="关闭预览">×</button>
-      <Link href={postPath(post)}>
+      <ModalPostLink publicId={post.publicId} slug={post.slug}>
         <small><i />{post.categoryName}</small>
         <b>{post.title}</b>
         <p>{post.excerpt}</p>
         <footer><time>{formatLongDate(post.publishedAt)}</time><span>打开文章 ↗</span></footer>
-      </Link>
+      </ModalPostLink>
     </div>}
   </div>;
 }
