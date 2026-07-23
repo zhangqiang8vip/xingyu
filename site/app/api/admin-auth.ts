@@ -1,27 +1,22 @@
 import { cookies } from "next/headers";
-import { getChatGPTUser } from "../chatgpt-auth";
+import { env } from "cloudflare:workers";
+import { ensureDatabase } from "../../db/bootstrap";
 
 const SESSION_COOKIE = "xingyu_admin_session";
 const SESSION_SECONDS = 8 * 60 * 60;
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+const LOGIN_BLOCK_SECONDS = 30 * 60;
+const MAX_LOGIN_ATTEMPTS = 5;
 
 export type AdminIdentity = { displayName: string; email: string };
 
-export function isAllowedAdminEmail(email: string) {
-  const allowlist = (process.env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  return allowlist.includes(email.trim().toLowerCase());
+export function isPasswordLoginConfigured() {
+  return Boolean(validSessionSecret() && (process.env.ADMIN_PASSWORD_HASH || (process.env.NODE_ENV === "development" && process.env.ADMIN_PASSWORD)));
 }
 
 export async function getAdminIdentity(): Promise<AdminIdentity | null> {
-  const user = await getChatGPTUser();
-  if (user && isAllowedAdminEmail(user.email)) {
-    return { displayName: user.displayName, email: user.email };
-  }
-
-  if (process.env.NODE_ENV === "development" && await hasValidLocalSession()) {
-    return { displayName: "本地管理员", email: "local-admin" };
+  if (isPasswordLoginConfigured() && await hasValidAdminSession()) {
+    return { displayName: "星屿管理员", email: "password-admin" };
   }
   return null;
 }
@@ -35,22 +30,23 @@ export async function isAdminRequest(request?: Request) {
 }
 
 export async function verifyLocalAdminPassword(password: string) {
+  if (!validSessionSecret() || password.length < 12 || password.length > 256) return false;
+  const encoded = process.env.ADMIN_PASSWORD_HASH;
+  if (encoded) return verifyPbkdf2Password(password, encoded);
   if (process.env.NODE_ENV !== "development" || !process.env.ADMIN_PASSWORD) return false;
-  const [provided, expected] = await Promise.all([sha256(password), sha256(process.env.ADMIN_PASSWORD)]);
-  let difference = 0;
-  for (let index = 0; index < provided.length; index += 1) difference |= provided[index] ^ expected[index];
-  return difference === 0;
+  return constantTimeBytesEqual(await sha256(password), await sha256(process.env.ADMIN_PASSWORD));
 }
 
 export async function createLocalAdminSession() {
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-  const payload = String(expiresAt);
+  const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(18)));
+  const payload = `v1.${expiresAt}.${nonce}`;
   const signature = await sign(payload);
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, `${payload}.${signature}`, {
     httpOnly: true,
     sameSite: "strict",
-    secure: false,
+    secure: process.env.NODE_ENV !== "development",
     path: "/",
     maxAge: SESSION_SECONDS,
   });
@@ -58,19 +54,17 @@ export async function createLocalAdminSession() {
 
 export async function clearLocalAdminSession() {
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "strict", secure: false, path: "/", maxAge: 0 });
+  cookieStore.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV !== "development", path: "/", maxAge: 0 });
 }
 
-async function hasValidLocalSession() {
-  const secret = process.env.ADMIN_SESSION_SECRET;
-  if (!secret) return false;
+async function hasValidAdminSession() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return false;
-  const separator = token.indexOf(".");
-  if (separator < 1) return false;
-  const payload = token.slice(0, separator);
-  const signature = token.slice(separator + 1);
-  if (!/^\d+$/.test(payload) || Number(payload) <= Math.floor(Date.now() / 1000)) return false;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "v1" || !/^\d+$/.test(parts[1])) return false;
+  if (Number(parts[1]) <= Math.floor(Date.now() / 1000)) return false;
+  const payload = parts.slice(0, 3).join(".");
+  const signature = parts[3];
   return constantTimeTextEqual(signature, await sign(payload));
 }
 
@@ -86,6 +80,61 @@ async function sha256(value: string) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
+async function verifyPbkdf2Password(password: string, encoded: string) {
+  const [algorithm, iterationsText, saltText, expectedText] = encoded.split("$");
+  const iterations = Number(iterationsText);
+  if (algorithm !== "pbkdf2-sha256" || !Number.isInteger(iterations) || iterations < 210_000 || iterations > 1_000_000) return false;
+  try {
+    const salt = base64UrlToBytes(saltText);
+    const expected = base64UrlToBytes(expectedText);
+    if (salt.length < 16 || expected.length !== 32) return false;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    const derived = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256));
+    return constantTimeBytesEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+export async function getAdminLoginLimit(request: Request) {
+  await ensureDatabase();
+  const identifier = await loginIdentifier(request);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare("SELECT attempts, window_started, blocked_until FROM admin_login_attempts WHERE identifier = ?")
+    .bind(identifier).first<{ attempts:number; window_started:number; blocked_until:number }>();
+  if (!row) return { allowed:true, retryAfter:0, identifier, row:null };
+  const retryAfter = Math.max(0, row.blocked_until - now);
+  return { allowed:retryAfter === 0, retryAfter, identifier, row };
+}
+
+export async function recordAdminLoginFailure(limit: Awaited<ReturnType<typeof getAdminLoginLimit>>) {
+  const now = Math.floor(Date.now() / 1000);
+  const withinWindow = limit.row && now - limit.row.window_started < LOGIN_WINDOW_SECONDS;
+  const attempts = withinWindow ? limit.row!.attempts + 1 : 1;
+  const windowStarted = withinWindow ? limit.row!.window_started : now;
+  const blockedUntil = attempts >= MAX_LOGIN_ATTEMPTS ? now + LOGIN_BLOCK_SECONDS : 0;
+  await env.DB.prepare(`INSERT INTO admin_login_attempts (identifier, attempts, window_started, blocked_until, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(identifier) DO UPDATE SET attempts=excluded.attempts, window_started=excluded.window_started,
+      blocked_until=excluded.blocked_until, updated_at=excluded.updated_at`)
+    .bind(limit.identifier, attempts, windowStarted, blockedUntil, now).run();
+}
+
+export async function clearAdminLoginFailures(identifier: string) {
+  await env.DB.prepare("DELETE FROM admin_login_attempts WHERE identifier = ?").bind(identifier).run();
+}
+
+async function loginIdentifier(request: Request) {
+  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const secret = validSessionSecret() ?? "";
+  return bytesToBase64Url(await sha256(`${secret}:${ip}`));
+}
+
+function validSessionSecret() {
+  const secret = process.env.ADMIN_SESSION_SECRET;
+  return secret && secret.length >= 32 ? secret : "";
+}
+
 function constantTimeTextEqual(left: string, right: string) {
   const maxLength = Math.max(left.length, right.length);
   let difference = left.length ^ right.length;
@@ -93,10 +142,23 @@ function constantTimeTextEqual(left: string, right: string) {
   return difference === 0;
 }
 
+function constantTimeBytesEqual(left: Uint8Array, right: Uint8Array) {
+  const maxLength = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < maxLength; index += 1) difference |= (left[index] || 0) ^ (right[index] || 0);
+  return difference === 0;
+}
+
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = "";
   bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value: string) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 export function unauthorized() {

@@ -17,6 +17,22 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
+  const schemaVersion = "4";
+
+  try {
+    const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
+      .all<{ key:string; value:string }>();
+    const values = new Map((markers.results ?? []).map((row) => [row.key, row.value]));
+    if (values.get("schema_version") === schemaVersion) {
+      if (values.get("app_environment") !== runtimeEnvironment) {
+        throw new Error(`D1 environment mismatch: expected ${runtimeEnvironment}, found ${values.get("app_environment")}`);
+      }
+      return;
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("D1 environment mismatch")) throw error;
+    // A fresh database has no app_meta table yet and continues into initialization.
+  }
 
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS categories (
@@ -94,6 +110,13 @@ async function initialize() {
     d1.prepare("CREATE INDEX IF NOT EXISTS post_views_date_idx ON post_views(viewed_on)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS post_slug_history_post_idx ON post_slug_history(post_id)"),
     d1.prepare("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS admin_login_attempts (
+      identifier TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started INTEGER NOT NULL,
+      blocked_until INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )`),
     d1.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(title, excerpt, content, content='posts', content_rowid='id', tokenize='trigram')"),
     d1.prepare(`CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
       INSERT INTO posts_fts(rowid, title, excerpt, content) VALUES (new.id, new.title, new.excerpt, new.content);
@@ -147,4 +170,5 @@ async function initialize() {
     await d1.prepare("INSERT INTO posts_fts(posts_fts) VALUES ('rebuild')").run();
     await d1.prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('posts_fts_version', '2')").run();
   }
+  await d1.prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)").bind(schemaVersion).run();
 }
