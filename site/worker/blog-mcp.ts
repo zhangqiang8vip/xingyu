@@ -5,6 +5,7 @@ import { z } from "zod";
 import { slugify, type PostPayload } from "../app/api/posts/post-input";
 import { getDb } from "../db";
 import { ensureDatabase } from "../db/bootstrap";
+import { listMcpActivity, recordMcpActivity, type McpActivityAction } from "../db/mcp-activity";
 import { createPostRecord, getWritablePost, PostWriteError, updatePostRecord } from "../db/post-write";
 import { listAdminPosts } from "../db/queries";
 import { categories } from "../db/schema";
@@ -14,6 +15,15 @@ const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)
   .describe("文章的稳定 public_id、当前 slug 或后台数字 ID");
 const CATEGORY_SCHEMA = z.string().trim().min(1).max(100)
   .describe("分类 slug 或分类名称；不确定时先调用 list_categories");
+const CHANGE_SUMMARY_SCHEMA = z.string().trim().min(1).max(300)
+  .describe("展示在权限确认和操作记录中的中文变更摘要，例如“补充部署章节并修正文末链接”");
+const RECEIPT_OUTPUT_SCHEMA = z.object({
+  action: z.string(),
+  activity_id: z.number().nullable(),
+  summary: z.string(),
+  changed_fields: z.array(z.string()),
+  recorded_at: z.string().nullable(),
+});
 
 type ToolPayload = Record<string, unknown>;
 
@@ -32,6 +42,56 @@ function toolFailure(error: unknown) {
 
 function publicPostUrl(origin: string, post: { publicId: string; slug: string }) {
   return `${origin}/posts/${post.publicId}/${post.slug}`;
+}
+
+async function recordActivitySafely(input: Parameters<typeof recordMcpActivity>[0]) {
+  try {
+    return await recordMcpActivity(input);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "mcp_activity_write_failed",
+      action: input.action,
+      publicId: input.post.publicId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+}
+
+function changedPostFields(
+  current: Awaited<ReturnType<typeof hydratePost>>,
+  next: {
+    title: string;
+    slug: string;
+    excerpt: string;
+    content: string;
+    categoryId: number;
+    featured: boolean;
+  },
+) {
+  return [
+    current.title !== next.title ? "title" : null,
+    current.slug !== next.slug ? "slug" : null,
+    current.excerpt !== next.excerpt ? "excerpt" : null,
+    current.content !== next.content ? "content_markdown" : null,
+    current.categoryId !== next.categoryId ? "category" : null,
+    current.featured !== next.featured ? "featured" : null,
+  ].filter((field): field is string => field !== null);
+}
+
+function activityReceipt(
+  action: McpActivityAction,
+  activity: Awaited<ReturnType<typeof recordActivitySafely>>,
+  summary: string,
+  changedFields: string[],
+) {
+  return {
+    action,
+    activity_id: activity?.id ?? null,
+    summary,
+    changed_fields: changedFields,
+    recorded_at: activity?.createdAt ?? null,
+  };
 }
 
 async function resolveCategory(reference?: string) {
@@ -55,7 +115,7 @@ async function hydratePost(identifier: string) {
   return post;
 }
 
-function createBlogMcpServer(origin: string) {
+function createBlogMcpServer(origin: string, clientLabel: string) {
   const server = new McpServer(
     { name: "xingyu-blog-writer", version: "1.0.0" },
     {
@@ -63,6 +123,7 @@ function createBlogMcpServer(origin: string) {
         "这是星屿博客的线上写作 MCP。默认先用 create_draft 创建草稿；只有用户明确要求上线时才调用 publish_post。",
         "修改前先用 get_post 读取最新版，稳定 public_id 是首选标识。正文使用 Markdown。",
         "不要假设分类存在，必要时先调用 list_categories。update_post 不改变发布状态；发布和撤回分别使用独立工具。",
+        "调用任何写入工具前，先向用户说明文章标题、当前状态、将修改的字段与 change_summary；不要替用户默许发布或撤回。",
       ].join(" "),
     },
   );
@@ -161,9 +222,29 @@ function createBlogMcpServer(origin: string) {
     }
   });
 
+  server.registerTool("list_mcp_activity", {
+    title: "查看 AI 写作记录",
+    description: "只读查看最近的 MCP 写入回执，包括文章、操作、状态变化、修改字段、客户端与时间。",
+    inputSchema: {
+      limit: z.number().int().min(1).max(50).optional().default(20),
+    },
+    outputSchema: {
+      ok: z.boolean(),
+      activities: z.array(z.record(z.string(), z.unknown())).optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ limit }) => {
+    try {
+      return toolResult({ ok: true, activities: await listMcpActivity(limit) });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
   server.registerTool("create_draft", {
     title: "创建文章草稿",
-    description: "创建一篇新的 Markdown 草稿。此工具永远不会直接发布文章。",
+    description: "创建一篇新的 Markdown 草稿并生成操作回执。它永远不会直接发布文章。",
     inputSchema: {
       title: z.string().trim().min(1).max(200),
       content_markdown: z.string().max(750_000).optional().default(""),
@@ -171,10 +252,16 @@ function createBlogMcpServer(origin: string) {
       category: CATEGORY_SCHEMA.optional(),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional().default(false),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("创建新的 Markdown 文章草稿"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: {
+      ok: z.boolean(),
+      post: z.record(z.string(), z.unknown()).optional(),
+      receipt: RECEIPT_OUTPUT_SCHEMA.optional(),
+      error: z.string().optional(),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async ({ title, content_markdown, excerpt, category, slug, featured }) => {
+  }, async ({ title, content_markdown, excerpt, category, slug, featured, change_summary }) => {
     try {
       const resolvedCategory = await resolveCategory(category);
       const post = await createPostRecord({
@@ -187,6 +274,15 @@ function createBlogMcpServer(origin: string) {
         featured,
         publishedAt: null,
       });
+      const changedFields = ["title", "slug", "excerpt", "content_markdown", "category", "featured"];
+      const activity = await recordActivitySafely({
+        action: "create_draft",
+        post,
+        beforeStatus: null,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      });
       return toolResult({
         ok: true,
         post: {
@@ -197,6 +293,7 @@ function createBlogMcpServer(origin: string) {
           category: resolvedCategory.slug,
           message: "草稿已保存，尚未公开发布。",
         },
+        receipt: activityReceipt("create_draft", activity, change_summary, changedFields),
       });
     } catch (error) {
       return toolFailure(error);
@@ -205,7 +302,7 @@ function createBlogMcpServer(origin: string) {
 
   server.registerTool("update_post", {
     title: "更新文章内容",
-    description: "更新文章标题、Markdown 正文、摘要、分类、Slug 或精选状态，但保持当前发布状态不变。",
+    description: "在用户确认后更新文章内容并记录修改字段。若文章已发布，此操作会立即改变公开页面；发布状态本身保持不变。",
     inputSchema: {
       identifier: IDENTIFIER_SCHEMA,
       title: z.string().trim().min(1).max(200).optional(),
@@ -214,10 +311,16 @@ function createBlogMcpServer(origin: string) {
       category: CATEGORY_SCHEMA.optional(),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional(),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("更新文章内容"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ identifier, title, content_markdown, excerpt, category, slug, featured }) => {
+    outputSchema: {
+      ok: z.boolean(),
+      post: z.record(z.string(), z.unknown()).optional(),
+      receipt: RECEIPT_OUTPUT_SCHEMA.optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, async ({ identifier, title, content_markdown, excerpt, category, slug, featured, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
       const resolvedCategory = category ? await resolveCategory(category) : null;
@@ -231,7 +334,35 @@ function createBlogMcpServer(origin: string) {
         featured: featured ?? current.featured,
         publishedAt: current.publishedAt,
       };
+      const changedFields = changedPostFields(current, input);
+      if (!changedFields.length) {
+        return toolResult({
+          ok: true,
+          post: {
+            public_id: current.publicId,
+            title: current.title,
+            slug: current.slug,
+            status: current.status,
+            public_url: current.status === "published" ? publicPostUrl(origin, current) : null,
+          },
+          receipt: {
+            action: "update_post",
+            activity_id: null,
+            summary: "没有检测到内容变化，未执行写入。",
+            changed_fields: [],
+            recorded_at: null,
+          },
+        });
+      }
       const post = await updatePostRecord(current.id, input);
+      const activity = await recordActivitySafely({
+        action: "update_post",
+        post,
+        beforeStatus: current.status,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      });
       return toolResult({
         ok: true,
         post: {
@@ -242,6 +373,7 @@ function createBlogMcpServer(origin: string) {
           updated_at: post.updatedAt,
           public_url: post.status === "published" ? publicPostUrl(origin, post) : null,
         },
+        receipt: activityReceipt("update_post", activity, change_summary, changedFields),
       });
     } catch (error) {
       return toolFailure(error);
@@ -249,18 +381,43 @@ function createBlogMcpServer(origin: string) {
   });
 
   server.registerTool("publish_post", {
-    title: "发布文章",
-    description: "将指定草稿正式发布到线上。仅在用户明确要求发布时调用。",
+    title: "公开发布文章",
+    description: "重要操作：在用户明确确认后，将草稿公开发布到互联网，并返回公开地址和审计回执。",
     inputSchema: {
       identifier: IDENTIFIER_SCHEMA,
       published_at: z.string().datetime({ offset: true }).optional()
         .describe("可选 ISO 8601 发布时间；留空时使用首次发布时间或当前时间"),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("将文章公开发布到互联网"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ identifier, published_at }) => {
+    outputSchema: {
+      ok: z.boolean(),
+      post: z.record(z.string(), z.unknown()).optional(),
+      receipt: RECEIPT_OUTPUT_SCHEMA.optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, async ({ identifier, published_at, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
+      if (current.status === "published") {
+        return toolResult({
+          ok: true,
+          post: {
+            public_id: current.publicId,
+            title: current.title,
+            status: current.status,
+            published_at: current.publishedAt,
+            public_url: publicPostUrl(origin, current),
+          },
+          receipt: {
+            action: "publish_post",
+            activity_id: null,
+            summary: "文章已经处于发布状态，未重复写入。",
+            changed_fields: [],
+            recorded_at: null,
+          },
+        });
+      }
       const post = await updatePostRecord(current.id, {
         title: current.title,
         slug: current.slug,
@@ -271,6 +428,15 @@ function createBlogMcpServer(origin: string) {
         featured: current.featured,
         publishedAt: published_at ?? current.publishedAt,
       });
+      const changedFields = ["status", "published_at"];
+      const activity = await recordActivitySafely({
+        action: "publish_post",
+        post,
+        beforeStatus: current.status,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      });
       return toolResult({
         ok: true,
         post: {
@@ -280,6 +446,7 @@ function createBlogMcpServer(origin: string) {
           published_at: post.publishedAt,
           public_url: publicPostUrl(origin, post),
         },
+        receipt: activityReceipt("publish_post", activity, change_summary, changedFields),
       });
     } catch (error) {
       return toolFailure(error);
@@ -287,14 +454,40 @@ function createBlogMcpServer(origin: string) {
   });
 
   server.registerTool("unpublish_post", {
-    title: "撤回为草稿",
-    description: "将已发布文章撤回为草稿，公开页面将不再显示它；文章内容不会删除。",
-    inputSchema: { identifier: IDENTIFIER_SCHEMA },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  }, async ({ identifier }) => {
+    title: "从公开站点撤回文章",
+    description: "重要操作：在用户明确确认后将文章撤回为草稿，公开页面将立即不可见；正文不会删除。",
+    inputSchema: {
+      identifier: IDENTIFIER_SCHEMA,
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("从公开站点撤回文章并保留草稿"),
+    },
+    outputSchema: {
+      ok: z.boolean(),
+      post: z.record(z.string(), z.unknown()).optional(),
+      receipt: RECEIPT_OUTPUT_SCHEMA.optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, async ({ identifier, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
+      if (current.status === "draft") {
+        return toolResult({
+          ok: true,
+          post: {
+            public_id: current.publicId,
+            title: current.title,
+            status: current.status,
+            message: "文章已经是草稿，未重复写入。",
+          },
+          receipt: {
+            action: "unpublish_post",
+            activity_id: null,
+            summary: "文章已经是草稿，未重复写入。",
+            changed_fields: [],
+            recorded_at: null,
+          },
+        });
+      }
       const post = await updatePostRecord(current.id, {
         title: current.title,
         slug: current.slug,
@@ -305,6 +498,15 @@ function createBlogMcpServer(origin: string) {
         featured: current.featured,
         publishedAt: current.publishedAt,
       });
+      const changedFields = ["status"];
+      const activity = await recordActivitySafely({
+        action: "unpublish_post",
+        post,
+        beforeStatus: current.status,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      });
       return toolResult({
         ok: true,
         post: {
@@ -313,6 +515,7 @@ function createBlogMcpServer(origin: string) {
           status: post.status,
           message: "文章已撤回为草稿，内容仍然保留。",
         },
+        receipt: activityReceipt("unpublish_post", activity, change_summary, changedFields),
       });
     } catch (error) {
       return toolFailure(error);
@@ -375,7 +578,8 @@ export async function handleBlogMcpRequest(
   }
 
   const origin = new URL(request.url).origin;
-  const server = createBlogMcpServer(origin);
+  const clientLabel = (request.headers.get("User-Agent") || "remote-mcp").slice(0, 160);
+  const server = createBlogMcpServer(origin, clientLabel);
   const response = await createMcpHandler(server, {
     route: MCP_PATH,
     enableJsonResponse: true,

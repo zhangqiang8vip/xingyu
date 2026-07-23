@@ -60,9 +60,17 @@ https://zhangwansen.click/mcp
 ```
 
 它直接复用博客的正式 D1 数据库，提供分类查询、文章搜索、完整 Markdown
-读取、创建草稿、更新文章、发布和撤回工具。MCP 使用独立的
+读取、创建草稿、更新文章、发布、撤回和 AI 写作记录查询工具。MCP 使用独立的
 `MCP_WRITE_TOKEN` Bearer 令牌，不使用后台登录密码。默认工作流是先创建
 草稿，只有显式调用发布工具时文章才会上线。
+
+权限采用类似 Notion 的分级方式：
+
+- 分类、搜索、文章读取和写作记录为只读工具，可直接执行。
+- 创建草稿和修改正文是普通写操作，执行前由客户端确认。
+- 发布、撤回以及修改已发布文章带有 destructive/open-world 标注，必须重点确认。
+- 每次真实写入返回包含操作、修改字段、摘要和时间的 receipt，并持久化到
+  `mcp_activity`；无变化的重复调用不会再次写入。
 
 Codex 可以在 `~/.codex/config.toml` 中这样连接：
 
@@ -71,6 +79,30 @@ Codex 可以在 `~/.codex/config.toml` 中这样连接：
 url = "https://zhangwansen.click/mcp"
 bearer_token_env_var = "XINGYU_BLOG_MCP_TOKEN"
 default_tools_approval_mode = "writes"
+
+[mcp_servers.xingyu_blog.tools.list_categories]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.search_posts]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.get_post]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.list_mcp_activity]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.create_draft]
+approval_mode = "prompt"
+
+[mcp_servers.xingyu_blog.tools.update_post]
+approval_mode = "prompt"
+
+[mcp_servers.xingyu_blog.tools.publish_post]
+approval_mode = "prompt"
+
+[mcp_servers.xingyu_blog.tools.unpublish_post]
+approval_mode = "prompt"
 ```
 
 令牌只放入本机 `XINGYU_BLOG_MCP_TOKEN` 环境变量，不要写入仓库或

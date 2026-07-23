@@ -83,3 +83,20 @@ export const postViews = sqliteTable("post_views", {
   primaryKey({ columns: [table.postId, table.visitorHash, table.viewedOn] }),
   index("post_views_date_idx").on(table.viewedOn),
 ]);
+
+export const mcpActivity = sqliteTable("mcp_activity", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  action: text("action").notNull(),
+  postId: integer("post_id").notNull(),
+  publicId: text("public_id").notNull(),
+  title: text("title").notNull(),
+  beforeStatus: text("before_status"),
+  afterStatus: text("after_status"),
+  changedFields: text("changed_fields").notNull().default("[]"),
+  summary: text("summary").notNull().default(""),
+  clientLabel: text("client_label").notNull().default("remote-mcp"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("mcp_activity_created_idx").on(table.createdAt, table.id),
+  index("mcp_activity_post_idx").on(table.postId, table.id),
+]);

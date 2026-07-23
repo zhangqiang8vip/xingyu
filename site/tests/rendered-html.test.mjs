@@ -82,6 +82,22 @@ test("published article edits preserve their publication date", async () => {
   assert.match(postWrite, /input\.publishedAt \?\? current\[0\]\.publishedAt \?\? new Date\(\)\.toISOString\(\)/);
 });
 
+test("remote MCP separates read approvals from important writes and records receipts", async () => {
+  const [mcp, schema, bootstrap, activity] = await Promise.all([
+    source("worker/blog-mcp.ts"), source("db/schema.ts"), source("db/bootstrap.ts"),
+    source("db/mcp-activity.ts"),
+  ]);
+  assert.match(mcp, /server\.registerTool\("list_mcp_activity"/);
+  assert.match(mcp, /change_summary: CHANGE_SUMMARY_SCHEMA/);
+  assert.match(mcp, /destructiveHint: true, idempotentHint: true, openWorldHint: true/);
+  assert.match(mcp, /activityReceipt\("publish_post"/);
+  assert.match(mcp, /没有检测到内容变化，未执行写入/);
+  assert.match(schema, /mcpActivity = sqliteTable\("mcp_activity"/);
+  assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS mcp_activity/);
+  assert.match(activity, /recordMcpActivity/);
+  assert.match(activity, /listMcpActivity/);
+});
+
 test("editor assets and post parsing stay scoped to their owners", async () => {
   const [rootLayout, adminLayout, postRoute, postInput, categoriesRoute, editor, transitions] = await Promise.all([
     source("app/layout.tsx"), source("app/admin/layout.tsx"), source("app/api/posts/route.ts"),

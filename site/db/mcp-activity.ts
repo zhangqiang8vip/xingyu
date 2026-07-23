@@ -1,0 +1,66 @@
+import { desc } from "drizzle-orm";
+import { getDb } from ".";
+import { ensureDatabase } from "./bootstrap";
+import { mcpActivity } from "./schema";
+
+export type McpActivityAction = "create_draft" | "update_post" | "publish_post" | "unpublish_post";
+
+type ActivityInput = {
+  action: McpActivityAction;
+  post: {
+    id: number;
+    publicId: string;
+    title: string;
+    status: string;
+  };
+  beforeStatus?: string | null;
+  changedFields: string[];
+  summary: string;
+  clientLabel: string;
+};
+
+export async function recordMcpActivity(input: ActivityInput) {
+  await ensureDatabase();
+  const [activity] = await getDb().insert(mcpActivity).values({
+    action: input.action,
+    postId: input.post.id,
+    publicId: input.post.publicId,
+    title: input.post.title,
+    beforeStatus: input.beforeStatus ?? null,
+    afterStatus: input.post.status,
+    changedFields: JSON.stringify(input.changedFields),
+    summary: input.summary,
+    clientLabel: input.clientLabel,
+  }).returning({ id: mcpActivity.id, createdAt: mcpActivity.createdAt });
+  return activity;
+}
+
+export async function listMcpActivity(limit: number) {
+  await ensureDatabase();
+  const rows = await getDb().select().from(mcpActivity)
+    .orderBy(desc(mcpActivity.createdAt), desc(mcpActivity.id))
+    .limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    action: row.action,
+    public_id: row.publicId,
+    title: row.title,
+    before_status: row.beforeStatus,
+    after_status: row.afterStatus,
+    changed_fields: parseChangedFields(row.changedFields),
+    summary: row.summary,
+    client: row.clientLabel,
+    created_at: row.createdAt,
+  }));
+}
+
+function parseChangedFields(value: string) {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
