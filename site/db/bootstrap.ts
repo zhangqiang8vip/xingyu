@@ -167,7 +167,18 @@ async function initialize() {
   const s = DEFAULT_SITE_SETTINGS;
   const p = DEFAULT_ABOUT_PAGE;
   await d1.batch([
-    d1.prepare("INSERT OR IGNORE INTO categories (id, name, slug, color) VALUES (1, '未分类', 'uncategorized', '#0071e3')"),
+    d1.prepare("INSERT OR IGNORE INTO categories (id, name, slug, color) VALUES (1, '随笔', 'notes', '#8E8E93')"),
+    d1.prepare(`UPDATE categories
+      SET name = '随笔', slug = 'notes', color = '#8E8E93'
+      WHERE slug = 'uncategorized'
+        AND NOT EXISTS (SELECT 1 FROM categories WHERE slug = 'notes')`),
+    d1.prepare(`UPDATE posts
+      SET category_id = (SELECT id FROM categories WHERE slug = 'notes')
+      WHERE category_id IN (SELECT id FROM categories WHERE slug = 'uncategorized')
+        AND EXISTS (SELECT 1 FROM categories WHERE slug = 'notes')`),
+    d1.prepare(`DELETE FROM categories
+      WHERE slug = 'uncategorized'
+        AND EXISTS (SELECT 1 FROM categories WHERE slug = 'notes')`),
     d1.prepare(`INSERT OR IGNORE INTO site_settings
       (id, brand_name, brand_latin, author_name, avatar_url, tagline, description, hero_lead, hero_tail,
        home_section_title, home_about_title, home_about_copy, footer_text, seo_title, seo_description, home_post_limit)

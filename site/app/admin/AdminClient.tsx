@@ -161,7 +161,7 @@ export default function AdminClient({ categories:initialCategories, settings, ab
             <div className="slug-preview">
               <div className="slug-icon">↗</div>
               <div className="slug-copy"><small>文章访问地址 · 永久 ID</small><p><span>{settings.brandName}</span><i>/</i><span>posts</span><i>/</i>{form.publicId&&<><span>{form.publicId.slice(0,8)}…</span><i>/</i></>}<b>{slugPreview(form.slug || form.title)}</b></p></div>
-              <span className="slug-category" style={{ color: selectedFormCategory?.color }}>{selectedFormCategory?.name ?? "未分类"}</span>
+              <span className="slug-category" style={{ color: selectedFormCategory?.color }}>{selectedFormCategory?.name ?? "随笔"}</span>
               <button type="button" onClick={async () => { const slug=slugPreview(form.slug || form.title); const path=form.publicId?postPath({publicId:form.publicId,slug}):`/posts/${slug}`; await navigator.clipboard.writeText(`${window.location.origin}${path}`); setSlugCopied(true); }}>{slugCopied ? "已复制" : "复制链接"}</button>
             </div>
             <label>文章摘要<textarea rows={3} value={form.excerpt} onChange={e => setForm({ ...form, excerpt: e.target.value })} placeholder="用一两句话告诉读者这篇文章讲什么" /></label>
@@ -184,7 +184,7 @@ export default function AdminClient({ categories:initialCategories, settings, ab
 
         <footer className="editor-footer"><span>⌘ Enter 快速保存</span><div><button type="button" onClick={() => setForm(null)}>取消</button><button className="save-button" type="submit">{form.status === "published" ? "保存并发布" : "保存草稿"}<i>→</i></button></div></footer>
       </form></div>}
-      {form&&studio&&<ArticleWritingStudio draft={form} categoryName={selectedFormCategory?.name??"未分类"} categoryColor={selectedFormCategory?.color??"#0071e3"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} initialMode={studio} onChange={(content)=>setForm(current=>current?{...current,content}:current)} onClose={()=>setStudio(null)}/>} 
+      {form&&studio&&<ArticleWritingStudio draft={form} categoryName={selectedFormCategory?.name??"随笔"} categoryColor={selectedFormCategory?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} initialMode={studio} onChange={(content)=>setForm(current=>current?{...current,content}:current)} onClose={()=>setStudio(null)}/>}
     </main>
   );
 }
