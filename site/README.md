@@ -50,3 +50,28 @@ npm test
 - 本地开发可使用 `.env.local` 中的开发凭据；环境文件不会提交。
 - 文章、分类、站点设置和页面内容保存在 D1，图片保存在 R2。
 - `ensureDatabase()` 在 Worker 实例内复用初始化结果，并在临时连接失败后允许重试。
+
+## AI Agent / MCP 写作
+
+线上站点提供标准 Streamable HTTP MCP 入口：
+
+```text
+https://zhangwansen.click/mcp
+```
+
+它直接复用博客的正式 D1 数据库，提供分类查询、文章搜索、完整 Markdown
+读取、创建草稿、更新文章、发布和撤回工具。MCP 使用独立的
+`MCP_WRITE_TOKEN` Bearer 令牌，不使用后台登录密码。默认工作流是先创建
+草稿，只有显式调用发布工具时文章才会上线。
+
+Codex 可以在 `~/.codex/config.toml` 中这样连接：
+
+```toml
+[mcp_servers.xingyu_blog]
+url = "https://zhangwansen.click/mcp"
+bearer_token_env_var = "XINGYU_BLOG_MCP_TOKEN"
+default_tools_approval_mode = "writes"
+```
+
+令牌只放入本机 `XINGYU_BLOG_MCP_TOKEN` 环境变量，不要写入仓库或
+`config.toml`。

@@ -34,16 +34,18 @@ test("development and production content stay on isolated databases", async () =
 });
 
 test("article routes use stable public ids and retain historical slugs", async () => {
-  const [schema, bootstrap, createRoute, updateRoute, legacyPage, stablePage, pathHelper] = await Promise.all([
+  const [schema, bootstrap, createRoute, updateRoute, postWrite, legacyPage, stablePage, pathHelper] = await Promise.all([
     source("db/schema.ts"), source("db/bootstrap.ts"), source("app/api/posts/route.ts"),
-    source("app/api/posts/[id]/route.ts"), source("app/posts/[slug]/page.tsx"),
+    source("app/api/posts/[id]/route.ts"), source("db/post-write.ts"), source("app/posts/[slug]/page.tsx"),
     source("app/posts/[slug]/[canonicalSlug]/page.tsx"), source("app/post-path.ts"),
   ]);
   assert.match(schema, /publicId: text\("public_id"\)/);
   assert.match(schema, /postSlugHistory/);
   assert.match(bootstrap, /postsWithoutPublicId/);
-  assert.match(createRoute, /createPostPublicId\(\)/);
-  assert.match(updateRoute, /insert\(postSlugHistory\)/);
+  assert.match(createRoute, /createPostRecord/);
+  assert.match(updateRoute, /updatePostRecord/);
+  assert.match(postWrite, /createPostPublicId\(\)/);
+  assert.match(postWrite, /insert\(postSlugHistory\)/);
   assert.match(legacyPage, /permanentRedirect\(postPath\(post\)\)/);
   assert.match(stablePage, /canonicalSlug !== post\.slug/);
   assert.match(pathHelper, /post\.publicId/);
@@ -75,9 +77,9 @@ test("public pages consume editable settings and shared presentation helpers", a
 });
 
 test("published article edits preserve their publication date", async () => {
-  const updateRoute = await source("app/api/posts/[id]/route.ts");
-  assert.match(updateRoute, /current\[0\]\.publishedAt/);
-  assert.match(updateRoute, /input\.publishedAt \?\? current\[0\]\.publishedAt \?\? new Date\(\)\.toISOString\(\)/);
+  const postWrite = await source("db/post-write.ts");
+  assert.match(postWrite, /current\[0\]\.publishedAt/);
+  assert.match(postWrite, /input\.publishedAt \?\? current\[0\]\.publishedAt \?\? new Date\(\)\.toISOString\(\)/);
 });
 
 test("editor assets and post parsing stay scoped to their owners", async () => {

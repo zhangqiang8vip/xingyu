@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { handleBlogMcpRequest, isBlogMcpPath } from "./blog-mcp";
 
 const PUBLIC_DOCUMENT_TTL_SECONDS = 120;
 const edgeCache = (caches as CacheStorage & { default: Cache }).default;
@@ -60,6 +61,10 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
+    }
+
+    if (isBlogMcpPath(url.pathname)) {
+      return handleBlogMcpRequest(request, env, ctx);
     }
 
     if (cacheable) {

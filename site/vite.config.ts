@@ -18,7 +18,10 @@ export default defineConfig(async ({ command, mode }) => {
   const localBindingConfig = {
     main: "./worker/index.ts",
     compatibility_flags: ["nodejs_compat"],
-    vars: { APP_ENV: appEnvironment },
+    vars: {
+      APP_ENV: appEnvironment,
+      ...(process.env.MCP_WRITE_TOKEN ? { MCP_WRITE_TOKEN: process.env.MCP_WRITE_TOKEN } : {}),
+    },
     d1_databases: d1
       ? [
           {
