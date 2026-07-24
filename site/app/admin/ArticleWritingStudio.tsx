@@ -25,5 +25,12 @@ export function ArticleFrontstage({draft,categoryName,categoryColor,authorName,a
   // iframe document when an editor switches directly from one article to another.
   const identity=draft.publicId ?? draft.id ?? "new-draft";
   const source=`/admin/article-preview?draft=${encodeURIComponent(String(identity))}`;
-  return <section className="writing-render"><iframe ref={frame} className="writing-frontstage-frame" src={source} title="真实文章前台预览" onLoad={sync}/></section>;
+  const syncFromTop=useCallback(()=>{
+    // Browsers can restore an iframe's old scroll position for the same draft URL.
+    // Reset only on frame load, never on every keystroke, so writers can inspect
+    // lower sections without the preview jumping away.
+    frame.current?.contentWindow?.scrollTo(0,0);
+    sync();
+  },[sync]);
+  return <section className="writing-render"><iframe ref={frame} className="writing-frontstage-frame" src={source} title="真实文章前台预览" onLoad={syncFromTop}/></section>;
 }
