@@ -22,6 +22,24 @@ function readNodeText(node: ReactNode): string {
   return "";
 }
 
+function codeLanguage(node: ReactNode): string {
+  const first = Array.isArray(node) ? node.find(isValidElement) : node;
+  if (!isValidElement<{ className?: string }>(first)) return "text";
+  return /language-([\w+-]+)/.exec(first.props.className || "")?.[1]?.toLowerCase() || "text";
+}
+
+function languageLabel(language: string): string {
+  const names: Record<string, string> = {
+    ts: "TypeScript", tsx: "TSX", js: "JavaScript", jsx: "JSX", json: "JSON",
+    sh: "Shell", shell: "Shell", bash: "Bash", zsh: "Zsh", ps1: "PowerShell", powershell: "PowerShell",
+    py: "Python", python: "Python", html: "HTML", xml: "XML", css: "CSS", scss: "SCSS",
+    sql: "SQL", yaml: "YAML", yml: "YAML", md: "Markdown", markdown: "Markdown",
+    java: "Java", go: "Go", rust: "Rust", rs: "Rust", c: "C", cpp: "C++", csharp: "C#", cs: "C#",
+    diff: "Diff", dockerfile: "Dockerfile", text: "Plain text",
+  };
+  return names[language] || language.toUpperCase();
+}
+
 function remarkXingyuDirectives() {
   return (tree: Root) => {
     visit(tree, "containerDirective", (node) => {
@@ -63,7 +81,8 @@ export default function MarkdownRenderer({ children }: { children: string }) {
     components={{
       pre({ children: preChildren, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");
-        return <div className="md-code-block"><pre {...props}>{preChildren}</pre><MarkdownCodeCopyButton value={source} /></div>;
+        const language = codeLanguage(preChildren);
+        return <div className="md-code-block"><span className="md-code-language">{languageLabel(language)}</span><pre {...props}>{preChildren}</pre><MarkdownCodeCopyButton value={source} /></div>;
       },
       code({ className, children: codeChildren, ...props }) {
         const language = /language-(\S+)/.exec(className || "")?.[1];
