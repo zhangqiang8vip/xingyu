@@ -31,6 +31,24 @@ export default function VditorEditor({ value, onChange, previewMode="both" }: { 
     let instance: Vditor | null = null;
     const host = hostRef.current;
     const syncEditorTheme = () => host?.classList.toggle("vditor--dark", document.documentElement.dataset.theme === "dark");
+    const configureVditorMermaid = (event: Event) => {
+      const script = event.target;
+      if (!(script instanceof HTMLScriptElement) || script.id !== "vditorMermaidScript") return;
+      const runtime = (window as Window & { mermaid?: { initialize?: (config: Record<string, unknown>) => void; __xingyuConfigured?: boolean } }).mermaid;
+      if (!runtime?.initialize || runtime.__xingyuConfigured) return;
+      const initialize = runtime.initialize.bind(runtime);
+      runtime.initialize = (config) => initialize({
+        ...config,
+        fontFamily: '"PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif',
+        altFontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
+        htmlLabels: false,
+        flowchart: { ...(config.flowchart as Record<string, unknown> ?? {}), htmlLabels: false, useMaxWidth: false, wrappingWidth: 280, nodeSpacing: 34, rankSpacing: 42, padding: 18 },
+      });
+      runtime.__xingyuConfigured = true;
+    };
+    // Vditor loads Mermaid itself. Intercept the script's capture-phase load event
+    // so its renderer receives the same Chinese-safe settings as the public reader.
+    document.addEventListener("load", configureVditorMermaid, true);
     const themeObserver = new MutationObserver(syncEditorTheme);
     themeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
     syncEditorTheme();
@@ -101,6 +119,7 @@ export default function VditorEditor({ value, onChange, previewMode="both" }: { 
       disposed = true;
       window.clearTimeout(timer);
       themeObserver.disconnect();
+      document.removeEventListener("load", configureVditorMermaid, true);
       host?.removeEventListener("keydown", keepHintSelectionVisible, true);
       if (instance && ready && (instance as Vditor & { vditor?: { element?: HTMLElement } }).vditor?.element) instance.destroy();
       if (editorRef.current === instance) editorRef.current = null;

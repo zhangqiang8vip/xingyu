@@ -182,5 +182,7 @@ test("admin and markdown editor share the site theme palette", async () => {
   assert.match(styles,/html\[data-theme="dark"\] \.admin-sidebar/);
   assert.match(editor,/vditor--dark/);
   assert.match(editor,/MutationObserver/);
+  assert.match(editor,/vditorMermaidScript/);
+  assert.match(editor,/wrappingWidth: 280/);
   assert.match(toggle,/xingyu:theme-change/);
 });
