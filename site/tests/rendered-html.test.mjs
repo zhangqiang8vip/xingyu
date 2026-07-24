@@ -126,10 +126,10 @@ test("admin search cancels stale work and avoids refetching stable stats", async
 });
 
 test("admin previews unsaved content through the real public pages", async () => {
-  const [admin, homeSettings, aboutEditor, studio, vditor, livePreview, bridge, postPage] = await Promise.all([
+  const [admin, homeSettings, aboutEditor, studio, previewEntry, vditor, livePreview, bridge, postPage] = await Promise.all([
     source("app/admin/AdminClient.tsx"), source("app/admin/AdminSettingsPanel.tsx"),
     source("app/admin/AdminPageEditor.tsx"), source("app/admin/ArticleWritingStudio.tsx"),
-    source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
+    source("app/admin/article-preview/page.tsx"), source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
     source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
   ]);
   assert.ok(admin.indexOf("首页设置") < admin.indexOf("文章管理"));
@@ -141,8 +141,10 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(admin, /setStudio\("split"\)/);
   assert.match(studio, /type Mode="code"\|"split"\|"reading"/);
   assert.match(studio, /writing-frontstage-frame/);
-  assert.match(studio, /adminPreview=article/);
-  assert.match(studio, /admin\/article-preview/);
+  assert.match(studio, /const source="\/admin\/article-preview"/);
+  assert.match(previewEntry, /id:-1/);
+  assert.match(previewEntry, /正在预览草稿/);
+  assert.doesNotMatch(previewEntry, /listHomePosts/);
   assert.match(livePreview, /src="\/\?adminPreview=home"/);
   assert.match(livePreview, /kind==="about"/);
   assert.match(livePreview, /kind:\s*"about"\|"connect"/);

@@ -1,13 +1,15 @@
 import { redirect } from "next/navigation";
 import { getAdminIdentity } from "../../api/admin-auth";
-import { listHomePosts } from "../../../db/queries";
+import PostPageView from "../../posts/PostPageView";
 
 export const dynamic="force-dynamic";
 
-/** Selects a real published article as the shell for a new/draft preview. */
+/** A stable, private shell for every draft preview. It never leaks another article. */
 export default async function ArticlePreviewEntry(){
   if(!await getAdminIdentity())redirect("/admin/login");
-  const [post]=await listHomePosts("all",1);
-  if(!post)redirect("/archive");
-  redirect(`/posts/${post.slug}?adminPreview=article`);
+  return <PostPageView adminPreview post={{
+    id:-1, publicId:"admin-preview", slug:"admin-preview", title:"正在预览草稿",
+    excerpt:"未保存的标题、摘要和正文会实时显示在这里。", content:"从左侧开始写作，正文会在这里实时呈现。",
+    publishedAt:null, viewCount:0, categoryName:"草稿预览", categorySlug:"draft-preview", categoryColor:"#0A84FF",
+  }} />;
 }

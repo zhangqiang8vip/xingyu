@@ -20,6 +20,6 @@ function ArticleFrontstage({draft,categoryName,categoryColor,authorName,avatarUr
   const payload=useMemo(()=>({...draft,title:draft.title||"未命名文章",excerpt:draft.excerpt||"文章摘要会显示在这里。",content:draft.content||"从左侧开始写作，正文会在这里实时呈现。",categoryName,categoryColor,authorName,avatarUrl,publishedLabel:formatLongDate(draft.publishedAt,"预览日期")}),[draft,categoryName,categoryColor,authorName,avatarUrl]);
   const sync=useCallback(()=>frame.current?.contentWindow?.postMessage({type:"xingyu:admin-preview",kind:"article",payload},window.location.origin),[payload]);
   useEffect(()=>{const ready=(event:MessageEvent)=>{if(event.origin===window.location.origin&&event.data?.type==="xingyu:admin-preview-ready"&&event.data?.kind==="article")sync()};window.addEventListener("message",ready);sync();return()=>window.removeEventListener("message",ready)},[sync]);
-  const source=draft.status==="published"&&draft.slug?.trim()?`/posts/${encodeURIComponent(draft.slug.trim())}?adminPreview=article`:"/admin/article-preview";
+  const source="/admin/article-preview";
   return <section className="writing-render"><iframe ref={frame} className="writing-frontstage-frame" src={source} title="真实文章前台预览" onLoad={sync}/></section>;
 }
