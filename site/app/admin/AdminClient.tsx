@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import VditorEditor from "./VditorEditor";
 import { postPath } from "../post-path";
 import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel";
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";
 import { CONTENT_LIMITS } from "../site-config";
 import AdminCategoriesPanel from "./AdminCategoriesPanel";
-import ArticleWritingStudio, { ArticleFrontstage } from "./ArticleWritingStudio";
+import ArticleWritingStudio, { ArticleFrontstage, useSplitScrollSync } from "./ArticleWritingStudio";
 import ThemeToggle from "../ThemeToggle";
 import { readApiJson } from "../api-response";
 
@@ -30,6 +30,7 @@ function toLocalDateTime(value?:string|null){
 }
 
 export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, userName, signOutPath }: { categories: Category[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:Stats; userName: string; signOutPath: string }) {
+  const articleEditorPreviewRef=useRef<HTMLDivElement>(null);
   const [section,setSection]=useState<"home"|"articles"|"connect"|"about"|"categories">("home");
   const [categories,setCategories]=useState(initialCategories);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -45,6 +46,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
   const [slugCopied, setSlugCopied] = useState(false);
   const [stats,setStats]=useState(initialStats);
   const [studio,setStudio]=useState<null|"code"|"split"|"reading">(null);
+  useSplitScrollSync(articleEditorPreviewRef,Boolean(form));
   const selectedFormCategory = form ? categories.find((item) => item.id === form.categoryId) : undefined;
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -180,7 +182,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
             <div className="editor-section-title"><span>02</span><div><b>正文内容</b><small>专注写作，右侧同步预览</small></div><button className="writing-launch" type="button" onClick={()=>setStudio("split")}><i>↗</i> 打开沉浸写作</button></div>
             <div className="md-field">
               <div className="md-field-head"><span>Markdown</span><span className="paste-status">输入 / 查看指令 · Ctrl+V 粘贴图片 · 右侧实时预览</span></div>
-              <div className="article-editor-workspace">
+              <div ref={articleEditorPreviewRef} className="article-editor-workspace">
                 <VditorEditor value={form.content} onChange={(content) => setForm((current) => current ? { ...current, content } : current)} previewMode="editor" />
                 <div className="article-editor-preview">
                   <div className="article-editor-preview-label"><i />真实前台预览 <span>未保存内容实时同步</span></div>

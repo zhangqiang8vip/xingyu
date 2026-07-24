@@ -1,11 +1,68 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import VditorEditor from "./VditorEditor";
 import { formatLongDate } from "../content-utils";
 
 type Mode="code"|"split"|"reading";
 export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published"};
+/** Keeps Markdown source and the real frontstage iframe on one reading progress. */
+export function useSplitScrollSync(rootRef:RefObject<HTMLElement|null>,enabled=true){
+  useEffect(()=>{
+    if(!enabled)return;
+    const root=rootRef.current;
+    if(!root)return;
+    let source:HTMLElement|null=null;
+    let frameWindow:Window|null=null;
+    let resetSource=false;
+    let resetFrame=false;
+    const ratio=(top:number,total:number,visible:number)=>Math.max(0,Math.min(1,total>visible?top/(total-visible):0));
+    const release=(target:"source"|"frame")=>window.requestAnimationFrame(()=>{if(target==="source")resetSource=false;else resetFrame=false});
+    const onSourceScroll=()=>{
+      if(!source||!frameWindow)return;
+      if(resetSource){resetSource=false;return}
+      const documentElement=frameWindow.document.documentElement;
+      const body=frameWindow.document.body;
+      const top=ratio(source.scrollTop,source.scrollHeight,source.clientHeight);
+      const max=Math.max(documentElement.scrollHeight,body.scrollHeight)-frameWindow.innerHeight;
+      resetFrame=true;
+      frameWindow.scrollTo(0,Math.max(0,Math.round(top*max)));
+      release("frame");
+    };
+    const onFrameScroll=()=>{
+      if(!source||!frameWindow)return;
+      if(resetFrame){resetFrame=false;return}
+      const documentElement=frameWindow.document.documentElement;
+      const body=frameWindow.document.body;
+      const top=ratio(frameWindow.scrollY,Math.max(documentElement.scrollHeight,body.scrollHeight),frameWindow.innerHeight);
+      resetSource=true;
+      source.scrollTop=Math.round(top*Math.max(0,source.scrollHeight-source.clientHeight));
+      release("source");
+    };
+    const detachFrame=()=>{frameWindow?.removeEventListener("scroll",onFrameScroll);frameWindow=null};
+    const attachFrame=()=>{
+      detachFrame();
+      const frame=root.querySelector<HTMLIFrameElement>(".writing-frontstage-frame");
+      if(!frame?.contentWindow)return;
+      frameWindow=frame.contentWindow;
+      frameWindow.addEventListener("scroll",onFrameScroll,{passive:true});
+    };
+    const attachSource=()=>{
+      const next=root.querySelector<HTMLElement>(".vditor-sv");
+      if(!next||next===source)return;
+      source?.removeEventListener("scroll",onSourceScroll);
+      source=next;
+      source.addEventListener("scroll",onSourceScroll,{passive:true});
+    };
+    const frame=root.querySelector<HTMLIFrameElement>(".writing-frontstage-frame");
+    frame?.addEventListener("load",attachFrame);
+    attachSource();
+    attachFrame();
+    const observer=new MutationObserver(attachSource);
+    observer.observe(root,{childList:true,subtree:true});
+    return()=>{observer.disconnect();source?.removeEventListener("scroll",onSourceScroll);frame?.removeEventListener("load",attachFrame);detachFrame()};
+  },[enabled,rootRef]);
+}
 export default function ArticleWritingStudio({draft,categoryName,categoryColor,authorName,avatarUrl,initialMode="split",onChange,onClose}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;initialMode?:Mode;onChange:(content:string)=>void;onClose:()=>void}){
   const [mode,setMode]=useState<Mode>(initialMode);
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};window.addEventListener("keydown",close);const overflow=document.body.style.overflow;document.body.style.overflow="hidden";return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=overflow}},[onClose]);
