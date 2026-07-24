@@ -157,9 +157,10 @@ test("admin previews unsaved content through the real public pages", async () =>
 });
 
 test("Markdown Plus is rendered through one safe, shared pipeline", async () => {
-  const [renderer, post, modal, bridge] = await Promise.all([
-    source("app/MarkdownRenderer.tsx"), source("app/posts/PostPageView.tsx"),
-    source("app/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
+  const [renderer, mermaid, post, modal, bridge, packageJson] = await Promise.all([
+    source("app/MarkdownRenderer.tsx"), source("app/MarkdownMermaid.tsx"),
+    source("app/posts/PostPageView.tsx"), source("app/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
+    source("package.json"),
   ]);
   assert.match(renderer, /remarkMath/);
   assert.match(renderer, /remarkDirective/);
@@ -167,9 +168,12 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
   assert.match(renderer, /rehypeSanitize/);
   assert.match(renderer, /rehypeKatex/);
   assert.match(renderer, /MarkdownMermaid/);
+  assert.match(mermaid, /import\("mermaid"\)/);
+  assert.doesNotMatch(mermaid, /cdn\.jsdelivr/);
   assert.match(post, /MarkdownRenderer/);
   assert.match(modal, /MarkdownRenderer/);
   assert.match(bridge, /MarkdownRenderer/);
+  assert.match(packageJson, /"deploy:production": "npm run build && wrangler deploy --config wrangler\.production\.jsonc"/);
 });
 
 test("admin and markdown editor share the site theme palette", async () => {

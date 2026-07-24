@@ -16,8 +16,9 @@ export default function MarkdownMermaid({ chart }: { chart: string }) {
 
   useEffect(() => {
     let active = true;
-    const mermaidModuleUrl = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    void import(/* @vite-ignore */ mermaidModuleUrl).then(async ({ default: mermaid }) => {
+    setError("");
+    setSvg("");
+    void import("mermaid").then(async ({ default: mermaid }) => {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
