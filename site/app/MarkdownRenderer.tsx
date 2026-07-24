@@ -1,4 +1,5 @@
 import type { Root } from "mdast";
+import { isValidElement, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
@@ -8,9 +9,17 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { visit } from "unist-util-visit";
 import MarkdownMermaid from "./MarkdownMermaid";
+import MarkdownCodeCopyButton from "./MarkdownCodeCopyButton";
 
 const calloutNames = new Set(["tip", "note", "warning", "quote"]);
 const calloutLabels: Record<string, string> = { tip: "提示", note: "笔记", warning: "注意", quote: "摘录" };
+
+function readNodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(readNodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return readNodeText(node.props.children);
+  return "";
+}
 
 function remarkXingyuDirectives() {
   return (tree: Root) => {
@@ -46,6 +55,10 @@ export default function MarkdownRenderer({ children }: { children: string }) {
     remarkPlugins={[remarkGfm, remarkMath, remarkDirective, remarkXingyuDirectives]}
     rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSchema], rehypeKatex]}
     components={{
+      pre({ children: preChildren, ...props }) {
+        const source = readNodeText(preChildren).replace(/\n$/, "");
+        return <div className="md-code-block"><pre {...props}>{preChildren}</pre><MarkdownCodeCopyButton value={source} /></div>;
+      },
       code({ className, children: codeChildren, ...props }) {
         const language = /language-(\S+)/.exec(className || "")?.[1];
         if (language === "mermaid") return <MarkdownMermaid chart={String(codeChildren).replace(/\n$/, "")} />;
