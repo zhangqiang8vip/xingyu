@@ -28,7 +28,7 @@ export default function MotionModeToggle() {
   };
   const currentLabel = mode === "flip" ? "动效" : "静态";
   const nextLabel = mode === "flip" ? "静态切换" : "翻页动效";
-  return <button className="motion-mode-button" type="button" onClick={select} aria-label={`当前${currentLabel}，点击切换为${nextLabel}`} title={`切换为${nextLabel}`}>
-    <i aria-hidden="true" /><span className="motion-flip">动效</span><span className="motion-static">静态</span>
+  return <button className="motion-mode-button" type="button" onClick={select} aria-label={`当前${currentLabel}，点击切换为${nextLabel}`} data-tooltip={`切换为${nextLabel}`}>
+    <i aria-hidden="true" />
   </button>;
 }

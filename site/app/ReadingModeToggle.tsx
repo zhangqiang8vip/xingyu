@@ -27,7 +27,7 @@ export default function ReadingModeToggle() {
   const currentLabel = mode === "modal" ? "弹窗" : "跳转";
   const nextLabel = next === "modal" ? "弹窗阅读" : "跳转页面阅读";
 
-  return <button className="reading-mode-button" type="button" onClick={() => choose(next)} aria-label={`当前${currentLabel}阅读，点击切换为${nextLabel}`} title={`切换为${nextLabel}`}>
-    <i className="reading-modal" aria-hidden="true">▣</i><i className="reading-page" aria-hidden="true">↗</i><span className="reading-modal">弹窗</span><span className="reading-page">跳转</span>
+  return <button className="reading-mode-button" type="button" onClick={() => choose(next)} aria-label={`当前${currentLabel}阅读，点击切换为${nextLabel}`} data-tooltip={`切换为${nextLabel}`}>
+    <i className="reading-modal" aria-hidden="true">▣</i><i className="reading-page" aria-hidden="true">↗</i>
   </button>;
 }

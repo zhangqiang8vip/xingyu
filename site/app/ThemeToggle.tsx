@@ -47,5 +47,5 @@ export default function ThemeToggle() {
   const current = options[currentIndex];
   const next = options[(currentIndex + 1) % options.length];
 
-  return <button className="theme-button" type="button" onClick={() => choose(next.value)} aria-label={`当前${current.label}，点击切换为${next.label}`} title={`当前：${current.label} · 点击切换`}><span className="theme-system" aria-hidden="true">◐</span><span className="theme-light" aria-hidden="true">☀</span><span className="theme-dark" aria-hidden="true">☾</span></button>;
+  return <button className="theme-button" type="button" onClick={() => choose(next.value)} aria-label={`当前${current.label}，点击切换为${next.label}`} data-tooltip={`当前${current.label} · 切换为${next.label}`}><span className="theme-system" aria-hidden="true">◐</span><span className="theme-light" aria-hidden="true">☀</span><span className="theme-dark" aria-hidden="true">☾</span></button>;
 }
