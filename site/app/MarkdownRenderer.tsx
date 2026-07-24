@@ -2,6 +2,7 @@ import type { Root } from "mdast";
 import { isValidElement, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkDirective from "remark-directive";
@@ -53,7 +54,12 @@ const markdownSchema = {
 export default function MarkdownRenderer({ children }: { children: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkMath, remarkDirective, remarkXingyuDirectives]}
-    rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSchema], rehypeKatex]}
+    rehypePlugins={[
+      rehypeRaw,
+      [rehypeSanitize, markdownSchema],
+      [rehypeHighlight, { detect: true, plainText: ["mermaid", "plaintext", "text", "txt"] }],
+      rehypeKatex,
+    ]}
     components={{
       pre({ children: preChildren, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");
