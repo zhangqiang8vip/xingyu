@@ -8,7 +8,7 @@ import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel"
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";
 import { CONTENT_LIMITS } from "../site-config";
 import AdminCategoriesPanel from "./AdminCategoriesPanel";
-import ArticleWritingStudio from "./ArticleWritingStudio";
+import ArticleWritingStudio, { ArticleFrontstage } from "./ArticleWritingStudio";
 import ThemeToggle from "../ThemeToggle";
 import { readApiJson } from "../api-response";
 
@@ -180,7 +180,13 @@ export default function AdminClient({ categories:initialCategories, settings, co
             <div className="editor-section-title"><span>02</span><div><b>正文内容</b><small>专注写作，右侧同步预览</small></div><button className="writing-launch" type="button" onClick={()=>setStudio("split")}><i>↗</i> 打开沉浸写作</button></div>
             <div className="md-field">
               <div className="md-field-head"><span>Markdown</span><span className="paste-status">输入 / 查看指令 · Ctrl+V 粘贴图片 · 右侧实时预览</span></div>
-              <VditorEditor value={form.content} onChange={(content) => setForm((current) => current ? { ...current, content } : current)} />
+              <div className="article-editor-workspace">
+                <VditorEditor value={form.content} onChange={(content) => setForm((current) => current ? { ...current, content } : current)} previewMode="editor" />
+                <div className="article-editor-preview">
+                  <div className="article-editor-preview-label"><i />真实前台预览 <span>未保存内容实时同步</span></div>
+                  <ArticleFrontstage draft={form} categoryName={selectedFormCategory?.name??"随笔"} categoryColor={selectedFormCategory?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} />
+                </div>
+              </div>
             </div>
           </section>
 

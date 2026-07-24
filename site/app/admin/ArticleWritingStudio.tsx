@@ -5,8 +5,8 @@ import VditorEditor from "./VditorEditor";
 import { formatLongDate } from "../content-utils";
 
 type Mode="code"|"split"|"reading";
-type Draft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published"};
-export default function ArticleWritingStudio({draft,categoryName,categoryColor,authorName,avatarUrl,initialMode="split",onChange,onClose}:{draft:Draft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;initialMode?:Mode;onChange:(content:string)=>void;onClose:()=>void}){
+export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published"};
+export default function ArticleWritingStudio({draft,categoryName,categoryColor,authorName,avatarUrl,initialMode="split",onChange,onClose}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;initialMode?:Mode;onChange:(content:string)=>void;onClose:()=>void}){
   const [mode,setMode]=useState<Mode>(initialMode);
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};window.addEventListener("keydown",close);const overflow=document.body.style.overflow;document.body.style.overflow="hidden";return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=overflow}},[onClose]);
   return <div className={`writing-studio mode-${mode}`} role="dialog" aria-modal="true" aria-label="沉浸式文章写作">
@@ -15,7 +15,8 @@ export default function ArticleWritingStudio({draft,categoryName,categoryColor,a
   </div>;
 }
 
-function ArticleFrontstage({draft,categoryName,categoryColor,authorName,avatarUrl}:{draft:Draft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string}){
+/** Shared by the compact editor and the immersive studio: never fork public preview markup. */
+export function ArticleFrontstage({draft,categoryName,categoryColor,authorName,avatarUrl}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string}){
   const frame=useRef<HTMLIFrameElement>(null);
   const payload=useMemo(()=>({...draft,title:draft.title||"未命名文章",excerpt:draft.excerpt||"文章摘要会显示在这里。",content:draft.content||"从左侧开始写作，正文会在这里实时呈现。",categoryName,categoryColor,authorName,avatarUrl,publishedLabel:formatLongDate(draft.publishedAt,"预览日期")}),[draft,categoryName,categoryColor,authorName,avatarUrl]);
   const sync=useCallback(()=>frame.current?.contentWindow?.postMessage({type:"xingyu:admin-preview",kind:"article",payload},window.location.origin),[payload]);

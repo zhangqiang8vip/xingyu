@@ -138,10 +138,13 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(homeSettings, /HomeLivePreview settings=\{form\}/);
   assert.match(aboutEditor, /ContentPageLivePreview page=\{form\}/);
   assert.match(admin, /setStudio\("reading"\)/);
+  assert.match(admin, /ArticleFrontstage/);
+  assert.match(admin, /previewMode="editor"/);
   assert.match(admin, /onClick=\{\(\) => preview\(post\)\}/);
   assert.match(admin, /setStudio\("split"\)/);
   assert.match(studio, /type Mode="code"\|"split"\|"reading"/);
   assert.match(studio, /writing-frontstage-frame/);
+  assert.match(studio, /export function ArticleFrontstage/);
   assert.match(studio, /article-preview\?draft=/);
   assert.match(studio, /key=\{draft\.publicId \?\? draft\.id/);
   assert.match(previewEntry, /id:-1/);
