@@ -28,6 +28,13 @@ function codeLanguage(node: ReactNode): string {
   return /language-([\w+-]+)/.exec(first.props.className || "")?.[1]?.toLowerCase() || "text";
 }
 
+function languageFromPreNode(node: unknown): string {
+  const child = (node as { children?: Array<{ properties?: { className?: string | string[] } }> })?.children?.[0];
+  const classes = child?.properties?.className;
+  const value = Array.isArray(classes) ? classes.join(" ") : classes || "";
+  return /language-([\w+-]+)/.exec(value)?.[1]?.toLowerCase() || "";
+}
+
 function languageLabel(language: string): string {
   const names: Record<string, string> = {
     ts: "TypeScript", tsx: "TSX", js: "JavaScript", jsx: "JSX", json: "JSON",
@@ -79,9 +86,10 @@ export default function MarkdownRenderer({ children }: { children: string }) {
       rehypeKatex,
     ]}
     components={{
-      pre({ children: preChildren, ...props }) {
+      pre({ children: preChildren, node, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");
-        const language = codeLanguage(preChildren);
+        const language = languageFromPreNode(node) || codeLanguage(preChildren);
+        if (language === "mermaid") return <>{preChildren}</>;
         return <div className="md-code-block"><span className="md-code-language">{languageLabel(language)}</span><pre {...props}>{preChildren}</pre><MarkdownCodeCopyButton value={source} /></div>;
       },
       code({ className, children: codeChildren, ...props }) {

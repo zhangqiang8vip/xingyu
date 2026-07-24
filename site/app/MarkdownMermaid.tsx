@@ -6,6 +6,13 @@ export default function MarkdownMermaid({ chart }: { chart: string }) {
   const id = useId().replace(/[:]/g, "");
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
+  const [themeVersion, setThemeVersion] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setThemeVersion((version) => version + 1);
+    window.addEventListener("xingyu:theme-change", refresh);
+    return () => window.removeEventListener("xingyu:theme-change", refresh);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -35,7 +42,7 @@ export default function MarkdownMermaid({ chart }: { chart: string }) {
       if (active) setError("图表语法暂时无法渲染");
     });
     return () => { active = false; };
-  }, [chart, id]);
+  }, [chart, id, themeVersion]);
 
   if (error) return <pre className="mermaid-fallback"><code>{chart}</code></pre>;
   if (!svg) return <div className="mermaid-loading" aria-label="正在绘制图表" />;
