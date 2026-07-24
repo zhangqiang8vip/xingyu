@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import ArticleEndMark from "./ArticleEndMark";
 import IslandSearch from "./IslandSearch";
 import { formatLongDate, isEditableTarget } from "./content-utils";
 import { postPath } from "./post-path";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 type ReaderPost = {
   publicId: string;
@@ -347,7 +346,7 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
           {tocItems.length > 0 && <button className={`reader-toc-toggle ${tocVisible ? "visible" : ""}`} type="button" onClick={() => setTocOpen((value) => !value)} aria-label="打开文章目录" aria-expanded={tocOpen}>目录</button>}
           <div className="reader-scroll" ref={scrollRef}>
             <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt)}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span></div></header>
-            <article className="reader-prose markdown-body" ref={articleRef}><ReactMarkdown remarkPlugins={[remarkGfm]}>{post.content}</ReactMarkdown><ArticleEndMark /></article>
+            <article className="reader-prose markdown-body" ref={articleRef}><MarkdownRenderer>{post.content}</MarkdownRenderer><ArticleEndMark /></article>
             <section className="reader-neighbors" aria-label="上一篇和下一篇">
               <header><small>KEEP READING</small><h2>继续阅读</h2></header>
               <div>

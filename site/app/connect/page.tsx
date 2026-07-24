@@ -1,6 +1,4 @@
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { getContentPage, getSiteSettings } from "../../db/queries";
 import type { PageSearchParams } from "../content-utils";
 import { copyrightText } from "../site-config";
@@ -8,6 +6,7 @@ import NavTitleChrome from "../NavTitleChrome";
 import IslandSearch from "../IslandSearch";
 import AdminPreviewBridge from "../AdminPreviewBridge";
 import SiteNavigation from "../SiteNavigation";
+import MarkdownRenderer from "../MarkdownRenderer";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +37,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Page
 
     <section className="about-belief connect-guide">
       <div><p>CODEX SETUP</p><h2>一条连接，保留完整的控制权。</h2><span>页面正文由星屿内容库维护，也可以通过 MCP 安全更新。</span></div>
-      <div className="belief-copy markdown-body" data-preview-markdown="content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{page.content}</ReactMarkdown></div>
+      <div className="belief-copy markdown-body" data-preview-markdown="content"><MarkdownRenderer>{page.content}</MarkdownRenderer></div>
     </section>
 
     <section className="connect-permissions">

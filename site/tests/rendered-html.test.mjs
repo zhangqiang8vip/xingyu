@@ -67,7 +67,7 @@ test("public pages consume editable settings and shared presentation helpers", a
   assert.match(post, /<SiteNavigation/);
   assert.match(navigation, /<ReadingModeToggle \/>/);
   assert.match(about, /getContentPage\("about"\)/);
-  assert.match(about, /ReactMarkdown/);
+  assert.match(about, /MarkdownRenderer/);
   assert.match(post, /PostViewTracker/);
   assert.match(layout, /generateMetadata/);
   assert.match(admin, /AdminPageEditor/);
@@ -147,9 +147,25 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(livePreview, /kind==="about"/);
   assert.match(livePreview, /kind:\s*"about"\|"connect"/);
   assert.match(bridge, /createPortal/);
-  assert.match(bridge, /ReactMarkdown/);
+  assert.match(bridge, /MarkdownRenderer/);
   assert.match(postPage, /AdminPreviewBridge kind="article"/);
   assert.match(vditor, /previewMode="both"/);
+});
+
+test("Markdown Plus is rendered through one safe, shared pipeline", async () => {
+  const [renderer, post, modal, bridge] = await Promise.all([
+    source("app/MarkdownRenderer.tsx"), source("app/posts/PostPageView.tsx"),
+    source("app/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
+  ]);
+  assert.match(renderer, /remarkMath/);
+  assert.match(renderer, /remarkDirective/);
+  assert.match(renderer, /rehypeRaw/);
+  assert.match(renderer, /rehypeSanitize/);
+  assert.match(renderer, /rehypeKatex/);
+  assert.match(renderer, /MarkdownMermaid/);
+  assert.match(post, /MarkdownRenderer/);
+  assert.match(modal, /MarkdownRenderer/);
+  assert.match(bridge, /MarkdownRenderer/);
 });
 
 test("admin and markdown editor share the site theme palette", async () => {

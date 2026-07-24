@@ -1,6 +1,4 @@
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { CSSProperties } from "react";
 import { getNextPublishedPost, getPreviousPublishedPost, getSiteSettings, type getPostByPublicId } from "../../db/queries";
 import SiteNavigation from "../SiteNavigation";
@@ -13,6 +11,7 @@ import PostReadingChrome from "./[slug]/PostReadingChrome";
 import PostTableOfContents from "./[slug]/PostTableOfContents";
 import PostSideNavigation from "./[slug]/PostSideNavigation";
 import PostViewTracker from "./[slug]/PostViewTracker";
+import MarkdownRenderer from "../MarkdownRenderer";
 
 type PublicPost = NonNullable<Awaited<ReturnType<typeof getPostByPublicId>>>;
 
@@ -34,7 +33,7 @@ export default async function PostPageView({ post, adminPreview = false }: { pos
     </header>
     <PostSideNavigation previousPost={previousPost} nextPost={nextPost} />
     <div className="post-reading-layout">
-      <article className="prose markdown-body" data-preview-markdown="content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{post.content}</ReactMarkdown><ArticleEndMark /></article>
+      <article className="prose markdown-body" data-preview-markdown="content"><MarkdownRenderer>{post.content}</MarkdownRenderer><ArticleEndMark /></article>
       <PostTableOfContents key={post.publicId} articleKey={post.publicId} />
     </div>
     <section className="post-end">

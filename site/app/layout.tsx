@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 import ScrollIndicator from "./ScrollIndicator";
 import RouteTransition from "./RouteTransition";
 import { getSiteSettings } from "../db/queries";

@@ -1,7 +1,5 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { getCategories, getContentPage, getSiteSettings } from "../../db/queries";
 import type { PageSearchParams } from "../content-utils";
 import { copyrightText } from "../site-config";
@@ -9,6 +7,7 @@ import NavTitleChrome from "../NavTitleChrome";
 import IslandSearch from "../IslandSearch";
 import AdminPreviewBridge from "../AdminPreviewBridge";
 import SiteNavigation from "../SiteNavigation";
+import MarkdownRenderer from "../MarkdownRenderer";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +24,7 @@ export default async function AboutPage({searchParams}:{searchParams:PageSearchP
       <figure className="about-portrait-large"><img data-preview-src="avatarUrl" src={settings.avatarUrl} alt={`${settings.authorName}头像`} /><figcaption><span data-preview-field="authorIdentity">{settings.authorName} · {settings.brandLatin}</span><small data-preview-field="tagline">{settings.tagline}</small></figcaption><i>✦</i></figure>
     </section>
 
-    <section className="about-belief about-page-content"><div><p>PERSONAL NOTES</p><h2 data-preview-field="title">{page.title}</h2></div><div className="belief-copy markdown-body" data-preview-markdown="content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{page.content}</ReactMarkdown></div></section>
+    <section className="about-belief about-page-content"><div><p>PERSONAL NOTES</p><h2 data-preview-field="title">{page.title}</h2></div><div className="belief-copy markdown-body" data-preview-markdown="content"><MarkdownRenderer>{page.content}</MarkdownRenderer></div></section>
 
     <section className="about-topics"><header><p>CURRENT THEMES</p><h2>浏览文章分类</h2><span>分类由写作后台维护，会随着新的关注方向继续生长。</span></header><div>{categories.map((category,index)=><article key={category.id} style={{"--topic-color":category.color} as CSSProperties}><div><span>{String(index+1).padStart(2,"0")}</span><i /></div><small>{category.slug.toUpperCase()}</small><h3>{category.name}</h3><p>阅读“{category.name}”分类下已经发布的全部文章与持续更新。</p><Link href={`/archive?category=${category.slug}`}>阅读这一类文章 <b>↗</b></Link></article>)}</div></section>
 

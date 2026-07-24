@@ -2,8 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 type PreviewKind = "home" | "about" | "connect" | "article";
 type PreviewPayload = Record<string, string | number>;
@@ -61,5 +60,5 @@ export default function AdminPreviewBridge({ kind }: { kind: PreviewKind }) {
   }, [kind, payload]);
 
   if (!payload || typeof payload.content !== "string" || !markdownTarget) return null;
-  return createPortal(<ReactMarkdown remarkPlugins={[remarkGfm]}>{payload.content}</ReactMarkdown>, markdownTarget);
+  return createPortal(<MarkdownRenderer>{payload.content}</MarkdownRenderer>, markdownTarget);
 }
