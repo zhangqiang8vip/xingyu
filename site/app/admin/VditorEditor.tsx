@@ -16,7 +16,7 @@ const slashHints = [
   { html: "<b>▧</b><span>图片</span>", value: "![图片说明](图片地址)" },
 ];
 
-export default function VditorEditor({ value, onChange, previewMode="both" }: { value: string; onChange: (value: string) => void; previewMode?:"both"|"editor" }) {
+export default function VditorEditor({ value, onChange, previewMode="both", autoFocus=false }: { value: string; onChange: (value: string) => void; previewMode?:"both"|"editor"; autoFocus?:boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Vditor | null>(null);
   const changeRef = useRef(onChange);
@@ -104,10 +104,19 @@ export default function VditorEditor({ value, onChange, previewMode="both" }: { 
             return JSON.stringify({ code: 0, msg: "", data: { errFiles: [], succMap: { [files[0].name]: response.url } } });
           },
         },
-        input: (nextValue) => changeRef.current(nextValue),
+        input: (nextValue) => {
+          changeRef.current(nextValue);
+          // React updates the parent form after each keystroke. Keep the caret in
+          // Vditor instead of allowing the adjacent live-preview iframe to win focus.
+          window.requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (active instanceof HTMLElement && hostRef.current?.contains(active)) active.focus({ preventScroll:true });
+          });
+        },
         after: () => {
           ready = true;
           syncEditorTheme();
+          if (autoFocus) window.requestAnimationFrame(() => hostRef.current?.querySelector<HTMLElement>(".vditor-ir")?.focus({ preventScroll:true }));
           if (disposed && (nextEditor as Vditor & { vditor?: { element?: HTMLElement } }).vditor?.element) nextEditor.destroy();
         },
       });
@@ -124,7 +133,7 @@ export default function VditorEditor({ value, onChange, previewMode="both" }: { 
       if (instance && ready && (instance as Vditor & { vditor?: { element?: HTMLElement } }).vditor?.element) instance.destroy();
       if (editorRef.current === instance) editorRef.current = null;
     };
-  }, [previewMode]);
+  }, [previewMode, autoFocus]);
 
   return <div className="vditor-host" ref={hostRef} />;
 }

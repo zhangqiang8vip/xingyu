@@ -147,6 +147,10 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(studio, /export function ArticleFrontstage/);
   assert.match(studio, /article-preview\?draft=/);
   assert.match(studio, /key=\{draft\.publicId \?\? draft\.id/);
+  assert.match(studio, /onSourceScroll/);
+  assert.match(studio, /onFrameScroll/);
+  assert.match(studio, /autoFocus/);
+  assert.match(vditor, /preventScroll:true/);
   assert.match(previewEntry, /id:-1/);
   assert.match(previewEntry, /正在预览草稿/);
   assert.doesNotMatch(previewEntry, /listHomePosts/);

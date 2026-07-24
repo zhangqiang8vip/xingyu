@@ -9,9 +9,63 @@ export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;
 export default function ArticleWritingStudio({draft,categoryName,categoryColor,authorName,avatarUrl,initialMode="split",onChange,onClose}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;initialMode?:Mode;onChange:(content:string)=>void;onClose:()=>void}){
   const [mode,setMode]=useState<Mode>(initialMode);
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};window.addEventListener("keydown",close);const overflow=document.body.style.overflow;document.body.style.overflow="hidden";return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=overflow}},[onClose]);
+  useEffect(()=>{
+    if(mode!=="split")return;
+    const root=document.querySelector<HTMLElement>(".writing-studio");
+    if(!root)return;
+    let source:HTMLElement|null=null;
+    let frameWindow:Window|null=null;
+    let resetSource=false;
+    let resetFrame=false;
+    const ratio=(top:number,total:number,visible:number)=>Math.max(0,Math.min(1,total>visible?top/(total-visible):0));
+    const release=(target:"source"|"frame")=>window.requestAnimationFrame(()=>{if(target==="source")resetSource=false;else resetFrame=false});
+    const onSourceScroll=()=>{
+      if(!source||!frameWindow)return;
+      if(resetSource){resetSource=false;return}
+      const documentElement=frameWindow.document.documentElement;
+      const body=frameWindow.document.body;
+      const top=ratio(source.scrollTop,source.scrollHeight,source.clientHeight);
+      const max=Math.max(documentElement.scrollHeight,body.scrollHeight)-frameWindow.innerHeight;
+      resetFrame=true;
+      frameWindow.scrollTo(0,Math.max(0,Math.round(top*max)));
+      release("frame");
+    };
+    const onFrameScroll=()=>{
+      if(!source||!frameWindow)return;
+      if(resetFrame){resetFrame=false;return}
+      const documentElement=frameWindow.document.documentElement;
+      const body=frameWindow.document.body;
+      const top=ratio(frameWindow.scrollY,Math.max(documentElement.scrollHeight,body.scrollHeight),frameWindow.innerHeight);
+      resetSource=true;
+      source.scrollTop=Math.round(top*Math.max(0,source.scrollHeight-source.clientHeight));
+      release("source");
+    };
+    const detachFrame=()=>{frameWindow?.removeEventListener("scroll",onFrameScroll);frameWindow=null};
+    const attachFrame=()=>{
+      detachFrame();
+      const frame=root.querySelector<HTMLIFrameElement>(".writing-frontstage-frame");
+      if(!frame?.contentWindow)return;
+      frameWindow=frame.contentWindow;
+      frameWindow.addEventListener("scroll",onFrameScroll,{passive:true});
+    };
+    const attachSource=()=>{
+      const next=root.querySelector<HTMLElement>(".writing-source .vditor-sv");
+      if(!next||next===source)return;
+      source?.removeEventListener("scroll",onSourceScroll);
+      source=next;
+      source.addEventListener("scroll",onSourceScroll,{passive:true});
+    };
+    const frame=root.querySelector<HTMLIFrameElement>(".writing-frontstage-frame");
+    frame?.addEventListener("load",attachFrame);
+    attachSource();
+    attachFrame();
+    const observer=new MutationObserver(attachSource);
+    observer.observe(root,{childList:true,subtree:true});
+    return()=>{observer.disconnect();source?.removeEventListener("scroll",onSourceScroll);frame?.removeEventListener("load",attachFrame);detachFrame()};
+  },[mode]);
   return <div className={`writing-studio mode-${mode}`} role="dialog" aria-modal="true" aria-label="沉浸式文章写作">
     <header><div className="writing-studio-brand"><i style={{background:categoryColor}}/><span>实时写作</span><b>{draft.title||"未命名文章"}</b></div><div className="writing-mode-switch" aria-label="写作方式"><button className={mode==="code"?"active":""} onClick={()=>setMode("code")}>源码</button><button className={mode==="split"?"active":""} onClick={()=>setMode("split")}>分屏</button><button className={mode==="reading"?"active":""} onClick={()=>setMode("reading")}>阅读</button></div><div className="writing-studio-actions"><span>内容实时保留在编辑表单</span><button onClick={onClose}>完成</button></div></header>
-    <main>{mode!=="reading"&&<section className="writing-source"><div><span>MARKDOWN SOURCE</span><small>输入 / 使用指令 · Ctrl+V 粘贴图片</small></div><VditorEditor value={draft.content} onChange={onChange} previewMode="editor"/></section>}{mode!=="code"&&<ArticleFrontstage key={draft.publicId ?? draft.id ?? "new-draft"} draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>}</main>
+    <main>{mode!=="reading"&&<section className="writing-source"><div><span>MARKDOWN SOURCE</span><small>输入 / 使用指令 · Ctrl+V 粘贴图片</small></div><VditorEditor value={draft.content} onChange={onChange} previewMode="editor" autoFocus/></section>}{mode!=="code"&&<ArticleFrontstage key={draft.publicId ?? draft.id ?? "new-draft"} draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>}</main>
   </div>;
 }
 
