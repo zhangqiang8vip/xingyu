@@ -1841,7 +1841,7 @@ html[data-theme="dark"] .admin-sidebar-top .theme-button{
   .table-wrap tbody td:first-child::before{display:none}
   .table-wrap tbody td:last-child{grid-column:1/-1;padding-top:3px}
   .title-cell{min-width:0;width:100%}.title-cell>div{min-width:0}.title-cell b,.title-cell small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .row-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.row-actions button{height:36px}
+  .row-actions{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.row-actions button{height:36px}
   .table-footer{margin-top:10px;padding:11px 13px}
   .config-form{margin-top:20px}.config-form .editor-section,.editor-section{padding:18px;border-radius:17px}
   .config-form .form-row,.category-manager article>div{grid-template-columns:1fr}

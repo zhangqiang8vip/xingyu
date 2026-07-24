@@ -107,6 +107,15 @@ export default function AdminClient({ categories:initialCategories, settings, co
     setForm(data.post); setMessage("");
   }
 
+  async function preview(post: Post) {
+    const response = await fetch(`/api/posts/${post.id}`);
+    const data = await readApiJson<{post:FormData}>(response);
+    if (!response.ok) return setMessage("文章预览暂时无法打开，请稍后再试");
+    setForm(data.post);
+    setMessage("");
+    setStudio("reading");
+  }
+
   async function remove(post: Post) {
     if (!window.confirm(`确定删除《${post.title}》吗？`)) return;
     await fetch(`/api/posts/${post.id}`, { method: "DELETE" });
@@ -141,7 +150,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
         <div className="table-wrap">
           <table><thead><tr><th>文章</th><th>分类</th><th>状态</th><th>浏览</th><th>发布时间</th><th>操作</th></tr></thead>
             <tbody>{loading ? <tr><td colSpan={6} className="table-empty">正在读取文章…</td></tr> : posts.length === 0 ? <tr><td colSpan={6} className="table-empty">没有符合条件的文章</td></tr> : posts.map(post => (
-              <tr key={post.id}><td data-label="文章"><div className="title-cell"><span>{post.id}</span><div><b>{post.title}</b><small>/{post.slug}</small></div></div></td><td data-label="分类">{post.categoryName}</td><td data-label="状态"><i className={`status ${post.status}`} />{post.status === "published" ? "已发布" : "草稿"}</td><td data-label="浏览">{post.viewCount.toLocaleString()}</td><td data-label="发布">{post.publishedAt ? new Date(post.publishedAt).toLocaleDateString("zh-CN") : "—"}</td><td data-label="操作"><div className="row-actions"><button onClick={() => edit(post)}>编辑</button><button className="danger" onClick={() => remove(post)}>删除</button></div></td></tr>
+              <tr key={post.id}><td data-label="文章"><div className="title-cell"><span>{post.id}</span><div><b>{post.title}</b><small>/{post.slug}</small></div></div></td><td data-label="分类">{post.categoryName}</td><td data-label="状态"><i className={`status ${post.status}`} />{post.status === "published" ? "已发布" : "草稿"}</td><td data-label="浏览">{post.viewCount.toLocaleString()}</td><td data-label="发布">{post.publishedAt ? new Date(post.publishedAt).toLocaleDateString("zh-CN") : "—"}</td><td data-label="操作"><div className="row-actions"><button onClick={() => preview(post)}>预览</button><button onClick={() => edit(post)}>编辑</button><button className="danger" onClick={() => remove(post)}>删除</button></div></td></tr>
             ))}</tbody></table>
         </div>
         <div className="table-footer"><span>游标分页 · 第 {cursorStack.length + 1} 批{posts.length ? ` · 当前 ${posts.length} 篇` : ""}</span><div><button disabled={cursorStack.length === 0} onClick={previousBatch}>←</button><button disabled={!nextCursor} onClick={nextBatch}>→</button></div></div>
