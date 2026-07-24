@@ -14,10 +14,20 @@ export default function MarkdownMermaid({ chart }: { chart: string }) {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
+        fontFamily: '"PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif',
+        fontSize: 15,
+        htmlLabels: false,
+        flowchart: {
+          useMaxWidth: false,
+          wrappingWidth: 280,
+          nodeSpacing: 34,
+          rankSpacing: 42,
+          padding: 18,
+        },
         theme: document.documentElement.dataset.theme === "dark" ? "dark" : "base",
         themeVariables: document.documentElement.dataset.theme === "dark"
-          ? { background: "transparent", primaryColor: "#24242a", primaryTextColor: "#f3f3f6", lineColor: "#8e8e98" }
-          : { background: "transparent", primaryColor: "#f3f5fa", primaryTextColor: "#1d1d20", lineColor: "#777b85" },
+          ? { background: "transparent", primaryColor: "#26262c", primaryBorderColor: "#51515b", primaryTextColor: "#f3f3f6", lineColor: "#81818d", edgeLabelBackground: "#1d1d21" }
+          : { background: "transparent", primaryColor: "#f5f7fb", primaryBorderColor: "#c9ced8", primaryTextColor: "#1d1d20", lineColor: "#737986", edgeLabelBackground: "#ffffff" },
       });
       const rendered = await mermaid.render(`xingyu-mermaid-${id}`, chart);
       if (active) setSvg(rendered.svg);
