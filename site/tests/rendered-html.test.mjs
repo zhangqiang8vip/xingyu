@@ -142,7 +142,8 @@ test("admin previews unsaved content through the real public pages", async () =>
   assert.match(admin, /setStudio\("split"\)/);
   assert.match(studio, /type Mode="code"\|"split"\|"reading"/);
   assert.match(studio, /writing-frontstage-frame/);
-  assert.match(studio, /const source="\/admin\/article-preview"/);
+  assert.match(studio, /article-preview\?draft=/);
+  assert.match(studio, /key=\{draft\.publicId \?\? draft\.id/);
   assert.match(previewEntry, /id:-1/);
   assert.match(previewEntry, /正在预览草稿/);
   assert.doesNotMatch(previewEntry, /listHomePosts/);
