@@ -113,7 +113,7 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
           />;
         })}
       </div>
-      {hoveredIndex !== null && rows[hoveredIndex] && <TimelinePreview post={rows[hoveredIndex]} index={hoveredIndex} total={rows.length} />}
+      {hoveredIndex !== null && rows[hoveredIndex] && <TimelinePreview post={rows[hoveredIndex]} index={hoveredIndex} />}
       <small>PAST</small>
     </aside>
 
@@ -131,7 +131,7 @@ export default function ArchiveExplorer({ initialRows, initialNextCursor, catego
   </>;
 }
 
-function TimelinePreview({ post, index, total }: { post: CursorPost; index: number; total: number }) {
+function TimelinePreview({ post, index }: { post: CursorPost; index: number }) {
   return <div className="timeline-preview">
     <div><span style={{ color: post.categoryColor ?? undefined }}>{post.categoryName}</span><time>{formatLongDate(post.publishedAt, "未定日期")}</time></div>
     <b>{post.title}</b><p>{post.excerpt}</p><small>{yearOf(post.publishedAt)} · 当前已加载第 {index + 1} 篇 · 点击定位</small>

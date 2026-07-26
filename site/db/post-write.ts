@@ -2,7 +2,7 @@ import { eq, or } from "drizzle-orm";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { createPostPublicId } from "./public-id";
-import { postSlugHistory, posts } from "./schema";
+import { postSlugHistory, posts, spaces } from "./schema";
 import type { PostPayload } from "../app/api/posts/post-input";
 
 const MAX_TITLE_LENGTH = 200;
@@ -28,11 +28,19 @@ export function validatePostInput(input: PostPayload) {
   if (input.excerpt.length > MAX_EXCERPT_LENGTH) throw new PostWriteError(`文章摘要不能超过 ${MAX_EXCERPT_LENGTH} 个字符`);
   if (input.content.length > MAX_CONTENT_LENGTH) throw new PostWriteError(`Markdown 正文不能超过 ${MAX_CONTENT_LENGTH} 个字符`);
   if (!Number.isInteger(input.categoryId) || input.categoryId < 1) throw new PostWriteError("文章分类无效");
+  if (input.spaceId !== null && (!Number.isInteger(input.spaceId) || input.spaceId < 1)) throw new PostWriteError("文章空间无效");
+}
+
+async function validateSpace(spaceId: number | null) {
+  if (spaceId === null) return;
+  const rows = await getDb().select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);
+  if (!rows[0]) throw new PostWriteError("所选知识空间不存在");
 }
 
 export async function createPostRecord(input: PostPayload) {
   validatePostInput(input);
   await ensureDatabase();
+  await validateSpace(input.spaceId);
 
   const historical = await getDb()
     .select({ postId: postSlugHistory.postId })
@@ -72,6 +80,7 @@ export async function getWritablePost(identifier: string | number) {
 export async function updatePostRecord(id: number, input: PostPayload) {
   validatePostInput(input);
   await ensureDatabase();
+  await validateSpace(input.spaceId);
 
   const current = await getDb()
     .select({ publishedAt: posts.publishedAt, slug: posts.slug })

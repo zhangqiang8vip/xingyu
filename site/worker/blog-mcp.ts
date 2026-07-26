@@ -5,16 +5,19 @@ import { z } from "zod";
 import { slugify, type PostPayload } from "../app/api/posts/post-input";
 import { getDb } from "../db";
 import { ensureDatabase } from "../db/bootstrap";
-import { listMcpActivity, recordMcpActivity, recordMcpPageActivity, type McpActivityAction } from "../db/mcp-activity";
+import { listMcpActivity, recordMcpActivity, recordMcpPageActivity, recordMcpSpaceActivity, type McpActivityAction } from "../db/mcp-activity";
 import { createPostRecord, getWritablePost, PostWriteError, updatePostRecord } from "../db/post-write";
 import { getContentPage, listAdminPosts } from "../db/queries";
 import { categories, contentPages } from "../db/schema";
+import { createSpace, deleteSpace, getSpaceOverview, getSpacePath, listSpaceChildren, listSpacePosts, resolveSpace, searchSpaces, updateSpace } from "../db/spaces";
 
 const MCP_PATH = "/mcp";
 const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)
   .describe("文章的稳定 public_id、当前 slug 或后台数字 ID");
 const CATEGORY_SCHEMA = z.string().trim().min(1).max(100)
   .describe("分类 slug 或分类名称；不确定时先调用 list_categories");
+const SPACE_SCHEMA = z.string().trim().min(1).max(500)
+  .describe("空间数字 ID，或使用 / 分隔的完整路径，例如“QSG / 研发团队 / 麒麟系统适配”");
 const CHANGE_SUMMARY_SCHEMA = z.string().trim().min(1).max(300)
   .describe("展示在权限确认和操作记录中的中文变更摘要，例如“补充部署章节并修正文末链接”");
 const RECEIPT_OUTPUT_SCHEMA = z.object({
@@ -72,6 +75,20 @@ async function recordPageActivitySafely(input: Parameters<typeof recordMcpPageAc
   }
 }
 
+async function recordSpaceActivitySafely(input: Parameters<typeof recordMcpSpaceActivity>[0]) {
+  try {
+    return await recordMcpSpaceActivity(input);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "mcp_space_activity_write_failed",
+      action: input.action,
+      spaceId: input.space.id,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+}
+
 function changedPostFields(
   current: Awaited<ReturnType<typeof hydratePost>>,
   next: {
@@ -80,6 +97,7 @@ function changedPostFields(
     excerpt: string;
     content: string;
     categoryId: number;
+    spaceId:number|null;
     featured: boolean;
   },
 ) {
@@ -89,6 +107,7 @@ function changedPostFields(
     current.excerpt !== next.excerpt ? "excerpt" : null,
     current.content !== next.content ? "content_markdown" : null,
     current.categoryId !== next.categoryId ? "category" : null,
+    current.spaceId !== next.spaceId ? "space" : null,
     current.featured !== next.featured ? "featured" : null,
   ].filter((field): field is string => field !== null);
 }
@@ -137,6 +156,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         "这是星屿博客的线上写作 MCP。默认先用 create_draft 创建草稿；只有用户明确要求上线时才调用 publish_post。",
         "修改前先用 get_post 读取最新版，稳定 public_id 是首选标识。正文使用 Markdown。",
         "不要假设分类存在，必要时先调用 list_categories。update_post 不改变发布状态；发布和撤回分别使用独立工具。",
+        "知识空间是私有内容边界。空间文章不会进入公开首页、归档或公开 URL；使用 list_spaces 确认路径，search_posts 可限定空间及其后代。",
         "独立页面先用 get_page 读取；update_page 会立即改变公开页面，必须先展示变更字段和摘要并获得用户确认。",
         "调用任何写入工具前，先向用户说明文章标题、当前状态、将修改的字段与 change_summary；不要替用户默许发布或撤回。",
       ].join(" "),
@@ -163,13 +183,144 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     }
   });
 
+  server.registerTool("list_spaces",{
+    title:"浏览知识空间",
+    description:"读取顶级空间或指定空间的直属子空间。空间层级不固定，可逐层浏览。",
+    inputSchema:{parent:SPACE_SCHEMA.optional(),query:z.string().trim().max(100).optional()},
+    outputSchema:{ok:z.boolean(),spaces:z.array(z.record(z.string(),z.unknown())).optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+  },async({parent,query})=>{
+    try{
+      if(query){
+        const matches=await searchSpaces(query);
+        return toolResult({ok:true,parent:null,spaces:matches.map((space)=>({...space,display_path:space.path.map((item)=>item.name).join(" / ")}))});
+      }
+      const parentSpace=parent?await resolveSpace(parent):null;
+      const rows=await listSpaceChildren(parentSpace?.id??null);
+      return toolResult({ok:true,parent:parentSpace?{id:parentSpace.id,name:parentSpace.name}:null,spaces:rows});
+    }catch(error){return toolFailure(error)}
+  });
+
+  server.registerTool("get_space",{
+    title:"读取知识空间",
+    description:"读取空间完整路径、直属子空间、后代数量与文章总数。",
+    inputSchema:{space:SPACE_SCHEMA},
+    outputSchema:{ok:z.boolean(),space:z.record(z.string(),z.unknown()).optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+  },async({space})=>{
+    try{
+      const resolved=await resolveSpace(space);
+      const overview=await getSpaceOverview(resolved.id);
+      return toolResult({ok:true,space:overview?{...overview,display_path:overview.path.map((item)=>item.name).join(" / ")}:null});
+    }catch(error){return toolFailure(error)}
+  });
+
+  server.registerTool("create_space",{
+    title:"创建知识空间",
+    description:"创建顶级空间或任意空间的子空间。写入前应向用户说明空间名称、父路径与用途。",
+    inputSchema:{name:z.string().trim().min(1).max(100),parent:SPACE_SCHEMA.optional(),change_summary:CHANGE_SUMMARY_SCHEMA},
+    outputSchema:{ok:z.boolean(),space:z.record(z.string(),z.unknown()).optional(),receipt:RECEIPT_OUTPUT_SCHEMA.optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+  },async({name,parent,change_summary})=>{
+    try{
+      const parentSpace=parent?await resolveSpace(parent):null;
+      const created=await createSpace({name,parentId:parentSpace?.id??null});
+      const path=await getSpacePath(created.id);
+      const activity=await recordSpaceActivitySafely({
+        action:"create_space",space:{id:created.id,name:created.name},
+        afterParentId:created.parentId,changedFields:["name","parent"],summary:change_summary,clientLabel,
+      });
+      return toolResult({ok:true,space:{...created,display_path:path.map((item)=>item.name).join(" / ")},receipt:activityReceipt("create_space",activity,change_summary,["name","parent"])});
+    }catch(error){return toolFailure(error)}
+  });
+
+  server.registerTool("update_space",{
+    title:"修改或移动知识空间",
+    description:"重要操作：重命名空间，或将空间移动到新的父空间；所有后代与文章会一起移动。",
+    inputSchema:{space:SPACE_SCHEMA,name:z.string().trim().min(1).max(100).optional(),parent:SPACE_SCHEMA.nullable().optional(),change_summary:CHANGE_SUMMARY_SCHEMA},
+    outputSchema:{ok:z.boolean(),space:z.record(z.string(),z.unknown()).optional(),receipt:RECEIPT_OUTPUT_SCHEMA.optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
+  },async({space,name,parent,change_summary})=>{
+    try{
+      const current=await resolveSpace(space);
+      const parentSpace=typeof parent==="string"?await resolveSpace(parent):parent===null?null:undefined;
+      const updated=await updateSpace(current.id,{name,parentId:parentSpace===undefined?undefined:parentSpace?.id??null});
+      const path=await getSpacePath(updated.id);
+      const changedFields=[
+        name!==undefined&&name.trim()!==current.name?"name":null,
+        parentSpace!==undefined&&(parentSpace?.id??null)!==current.parentId?"parent":null,
+      ].filter((field):field is string=>field!==null);
+      const activity=await recordSpaceActivitySafely({
+        action:"update_space",space:{id:updated.id,name:updated.name},
+        beforeParentId:current.parentId,afterParentId:updated.parentId,
+        changedFields,summary:change_summary,clientLabel,
+      });
+      return toolResult({ok:true,space:{...updated,display_path:path.map((item)=>item.name).join(" / ")},receipt:activityReceipt("update_space",activity,change_summary,changedFields)});
+    }catch(error){return toolFailure(error)}
+  });
+
+  server.registerTool("move_space",{
+    title:"移动知识空间",
+    description:"重要操作：将空间及其所有后代与文章移动到新的父空间。移动到知识空间根层时 parent 传 null。",
+    inputSchema:{space:SPACE_SCHEMA,parent:SPACE_SCHEMA.nullable(),change_summary:CHANGE_SUMMARY_SCHEMA},
+    outputSchema:{ok:z.boolean(),space:z.record(z.string(),z.unknown()).optional(),receipt:RECEIPT_OUTPUT_SCHEMA.optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
+  },async({space,parent,change_summary})=>{
+    try{
+      const current=await resolveSpace(space);
+      const parentSpace=parent===null?null:await resolveSpace(parent);
+      const updated=await updateSpace(current.id,{parentId:parentSpace?.id??null});
+      const path=await getSpacePath(updated.id);
+      const activity=await recordSpaceActivitySafely({
+        action:"move_space",space:{id:updated.id,name:updated.name},
+        beforeParentId:current.parentId,afterParentId:updated.parentId,
+        changedFields:["parent"],summary:change_summary,clientLabel,
+      });
+      return toolResult({ok:true,space:{...updated,display_path:path.map((item)=>item.name).join(" / ")},receipt:activityReceipt("move_space",activity,change_summary,["parent"])});
+    }catch(error){return toolFailure(error)}
+  });
+
+  server.registerTool("delete_space",{
+    title:"删除知识空间",
+    description:"高风险操作：可仅删除空空间、将内容移动到另一知识空间后删除，或递归删除全部后代与文章。递归删除必须提供与空间名称完全一致的确认文本。",
+    inputSchema:{
+      space:SPACE_SCHEMA,
+      mode:z.enum(["empty","move","recursive"]).default("empty"),
+      move_to:SPACE_SCHEMA.optional().describe("mode=move 时必填；接收原空间直属文章和子空间的目标知识空间"),
+      confirm_name:z.string().optional().default(""),
+      change_summary:CHANGE_SUMMARY_SCHEMA,
+    },
+    outputSchema:{ok:z.boolean(),result:z.record(z.string(),z.unknown()).optional(),receipt:RECEIPT_OUTPUT_SCHEMA.optional(),error:z.string().optional()},
+    annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
+  },async({space,mode,move_to,confirm_name,change_summary})=>{
+    try{
+      const current=await resolveSpace(space);
+      const moveTarget=mode==="move"&&move_to?await resolveSpace(move_to):null;
+      if(mode==="move"&&!moveTarget)throw new Error("移动内容后删除必须提供 move_to 目标知识空间");
+      const result=await deleteSpace(current.id,{mode,moveTo:moveTarget?.id,confirmName:confirm_name});
+      const changedFields=mode==="recursive"
+        ? ["space","descendants","articles"]
+        : mode==="move"
+          ? ["space","children_parent","article_space"]
+          : ["space"];
+      const activity=await recordSpaceActivitySafely({
+        action:"delete_space",space:{id:current.id,name:current.name},
+        beforeParentId:current.parentId,changedFields,
+        summary:change_summary,clientLabel,
+      });
+      return toolResult({ok:true,result,receipt:activityReceipt("delete_space",activity,change_summary,changedFields)});
+    }catch(error){return toolFailure(error)}
+  });
+
   server.registerTool("search_posts", {
     title: "搜索文章",
-    description: "按标题、摘要、Slug 或正文全文搜索线上文章，也可筛选草稿、已发布文章与分类。",
+    description: "按标题、摘要、Slug 或正文全文搜索公开文章和私有空间知识；可限定空间并选择是否包含全部后代。",
     inputSchema: {
       query: z.string().trim().max(200).optional().default(""),
       status: z.enum(["all", "draft", "published"]).optional().default("all"),
       category: z.string().trim().max(100).optional().default("all"),
+      space: SPACE_SCHEMA.optional(),
+      include_descendants:z.boolean().optional().default(true),
       cursor: z.string().max(180).optional(),
       page_size: z.number().int().min(1).max(50).optional().default(20),
     },
@@ -180,11 +331,12 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
       error: z.string().optional(),
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ query, status, category, cursor, page_size }) => {
+  }, async ({ query, status, category, space, include_descendants, cursor, page_size }) => {
     try {
-      const result = await listAdminPosts({
-        query, status, category, cursor, limit: page_size,
-      });
+      const resolvedSpace=space?await resolveSpace(space):null;
+      const result = resolvedSpace
+        ? await listSpacePosts({spaceId:resolvedSpace.id,includeDescendants:include_descendants,query,status,category,cursor,limit:page_size})
+        : await listAdminPosts({query,status,category,cursor,limit:page_size,space:"all"});
       const summaries = result.rows.map((post) => ({
         public_id: post.publicId,
         title: post.title,
@@ -195,7 +347,9 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         featured: post.featured,
         published_at: post.publishedAt,
         updated_at: post.updatedAt,
-        public_url: post.status === "published" ? publicPostUrl(origin, post) : null,
+        visibility:post.spaceId?"space":"public",
+        space_path:post.spacePath??null,
+        public_url: post.status === "published"&&!post.spaceId ? publicPostUrl(origin, post) : null,
       }));
       return toolResult({ ok: true, posts: summaries, next_cursor: result.nextCursor });
     } catch (error) {
@@ -215,6 +369,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
       const category = await getDb().select({
         name: categories.name, slug: categories.slug, color: categories.color,
       }).from(categories).where(eq(categories.id, post.categoryId)).limit(1);
+      const spacePath=post.spaceId?await getSpacePath(post.spaceId):[];
       return toolResult({
         ok: true,
         post: {
@@ -226,10 +381,12 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
           category: category[0] ?? null,
           status: post.status,
           featured: post.featured,
+          visibility:post.spaceId?"space":"public",
+          space:post.spaceId?{id:post.spaceId,path:spacePath.map((item)=>item.name),display_path:spacePath.map((item)=>item.name).join(" / ")}:null,
           published_at: post.publishedAt,
           created_at: post.createdAt,
           updated_at: post.updatedAt,
-          public_url: post.status === "published" ? publicPostUrl(origin, post) : null,
+          public_url: post.status === "published"&&!post.spaceId ? publicPostUrl(origin, post) : null,
         },
       });
     } catch (error) {
@@ -364,6 +521,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
       content_markdown: z.string().max(750_000).optional().default(""),
       excerpt: z.string().max(1_000).optional().default(""),
       category: CATEGORY_SCHEMA.optional(),
+      space: SPACE_SCHEMA.optional(),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional().default(false),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("创建新的 Markdown 文章草稿"),
@@ -375,20 +533,22 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
       error: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async ({ title, content_markdown, excerpt, category, slug, featured, change_summary }) => {
+  }, async ({ title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {
       const resolvedCategory = await resolveCategory(category);
+      const resolvedSpace=space?await resolveSpace(space):null;
       const post = await createPostRecord({
         title,
         slug: slugify(slug || title),
         excerpt,
         content: content_markdown,
         categoryId: resolvedCategory.id,
+        spaceId:resolvedSpace?.id??null,
         status: "draft",
-        featured,
+        featured:resolvedSpace?false:featured,
         publishedAt: null,
       });
-      const changedFields = ["title", "slug", "excerpt", "content_markdown", "category", "featured"];
+      const changedFields = ["title", "slug", "excerpt", "content_markdown", "category", "space", "featured"];
       const activity = await recordActivitySafely({
         action: "create_draft",
         post,
@@ -405,6 +565,8 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
           slug: post.slug,
           status: post.status,
           category: resolvedCategory.slug,
+          visibility:resolvedSpace?"space":"public",
+          space_path:resolvedSpace?(await getSpacePath(resolvedSpace.id)).map((item)=>item.name).join(" / "):null,
           message: "草稿已保存，尚未公开发布。",
         },
         receipt: activityReceipt("create_draft", activity, change_summary, changedFields),
@@ -416,13 +578,14 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
 
   server.registerTool("update_post", {
     title: "更新文章内容",
-    description: "在用户确认后更新文章内容并记录修改字段。若文章已发布，此操作会立即改变公开页面；发布状态本身保持不变。",
+    description: "在用户确认后更新文章内容并记录修改字段。已发布且不属于知识空间的文章会立即改变公开页面；知识空间文章仍保持私有。发布状态本身保持不变。",
     inputSchema: {
       identifier: IDENTIFIER_SCHEMA,
       title: z.string().trim().min(1).max(200).optional(),
       content_markdown: z.string().max(750_000).optional(),
       excerpt: z.string().max(1_000).optional(),
       category: CATEGORY_SCHEMA.optional(),
+      space: SPACE_SCHEMA.nullable().optional().describe("目标知识空间；传 null 表示移回公开博客，省略则保持当前位置"),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional(),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("更新文章内容"),
@@ -434,18 +597,21 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
       error: z.string().optional(),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, async ({ identifier, title, content_markdown, excerpt, category, slug, featured, change_summary }) => {
+  }, async ({ identifier, title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
       const resolvedCategory = category ? await resolveCategory(category) : null;
+      const resolvedSpace=typeof space==="string"?await resolveSpace(space):space===null?null:undefined;
+      const nextSpaceId=resolvedSpace===undefined?current.spaceId:resolvedSpace?.id??null;
       const input: PostPayload = {
         title: title ?? current.title,
         slug: slug ? slugify(slug) : current.slug,
         excerpt: excerpt ?? current.excerpt,
         content: content_markdown ?? current.content,
         categoryId: resolvedCategory?.id ?? current.categoryId,
+        spaceId:nextSpaceId,
         status: current.status,
-        featured: featured ?? current.featured,
+        featured:nextSpaceId===null?(featured??current.featured):false,
         publishedAt: current.publishedAt,
       };
       const changedFields = changedPostFields(current, input);
@@ -457,7 +623,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
             title: current.title,
             slug: current.slug,
             status: current.status,
-            public_url: current.status === "published" ? publicPostUrl(origin, current) : null,
+            public_url: current.status === "published"&&!current.spaceId ? publicPostUrl(origin, current) : null,
           },
           receipt: {
             action: "update_post",
@@ -485,7 +651,9 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
           slug: post.slug,
           status: post.status,
           updated_at: post.updatedAt,
-          public_url: post.status === "published" ? publicPostUrl(origin, post) : null,
+          visibility:post.spaceId?"space":"public",
+          space_path:post.spaceId?(await getSpacePath(post.spaceId)).map((item)=>item.name).join(" / "):null,
+          public_url: post.status === "published"&&!post.spaceId ? publicPostUrl(origin, post) : null,
         },
         receipt: activityReceipt("update_post", activity, change_summary, changedFields),
       });
@@ -495,13 +663,13 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
   });
 
   server.registerTool("publish_post", {
-    title: "公开发布文章",
-    description: "重要操作：在用户明确确认后，将草稿公开发布到互联网，并返回公开地址和审计回执。",
+    title: "发布文章或标记内容完成",
+    description: "重要操作：公开博客文章会发布到互联网；知识空间文章只会标记为内容完成，仍保持私有。必须在用户明确确认后调用。",
     inputSchema: {
       identifier: IDENTIFIER_SCHEMA,
       published_at: z.string().datetime({ offset: true }).optional()
         .describe("可选 ISO 8601 发布时间；留空时使用首次发布时间或当前时间"),
-      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("将文章公开发布到互联网"),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("发布文章或将空间文章标记为内容完成"),
     },
     outputSchema: {
       ok: z.boolean(),
@@ -521,12 +689,13 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
             title: current.title,
             status: current.status,
             published_at: current.publishedAt,
-            public_url: publicPostUrl(origin, current),
+            visibility:current.spaceId?"space":"public",
+            public_url: current.spaceId?null:publicPostUrl(origin, current),
           },
           receipt: {
             action: "publish_post",
             activity_id: null,
-            summary: "文章已经处于发布状态，未重复写入。",
+            summary: current.spaceId ? "空间文章已经标记为内容完成，未重复写入。" : "文章已经处于公开发布状态，未重复写入。",
             changed_fields: [],
             recorded_at: null,
           },
@@ -538,6 +707,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         excerpt: current.excerpt,
         content: current.content,
         categoryId: current.categoryId,
+        spaceId:current.spaceId,
         status: "published",
         featured: current.featured,
         publishedAt: published_at ?? current.publishedAt,
@@ -558,7 +728,8 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
           title: post.title,
           status: post.status,
           published_at: post.publishedAt,
-          public_url: publicPostUrl(origin, post),
+          visibility:post.spaceId?"space":"public",
+          public_url: post.spaceId?null:publicPostUrl(origin, post),
         },
         receipt: activityReceipt("publish_post", activity, change_summary, changedFields),
       });
@@ -568,11 +739,11 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
   });
 
   server.registerTool("unpublish_post", {
-    title: "从公开站点撤回文章",
-    description: "重要操作：在用户明确确认后将文章撤回为草稿，公开页面将立即不可见；正文不会删除。",
+    title: "将文章退回草稿",
+    description: "重要操作：公开文章会从站点撤回；知识空间文章会从内容完成状态退回草稿。正文不会删除。",
     inputSchema: {
       identifier: IDENTIFIER_SCHEMA,
-      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("从公开站点撤回文章并保留草稿"),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("将文章退回草稿并保留正文"),
     },
     outputSchema: {
       ok: z.boolean(),
@@ -608,6 +779,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         excerpt: current.excerpt,
         content: current.content,
         categoryId: current.categoryId,
+        spaceId:current.spaceId,
         status: "draft",
         featured: current.featured,
         publishedAt: current.publishedAt,

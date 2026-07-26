@@ -6,12 +6,14 @@ import { parsePostPayload } from "./post-input";
 export async function GET(request: Request) {
   if (!(await isAdminRequest(request))) return unauthorized();
   const url = new URL(request.url);
+  const scope = url.searchParams.get("scope");
   return Response.json(await listAdminPosts({
     cursor: url.searchParams.get("cursor") ?? undefined,
     limit: Number(url.searchParams.get("pageSize")) || 20,
     query: url.searchParams.get("q") ?? "",
     category: url.searchParams.get("category") ?? "all",
     status: (url.searchParams.get("status") as "draft" | "published" | "all") ?? "all",
+    space: scope === "all" ? "all" : scope === "private" ? "private" : "public",
   }));
 }
 

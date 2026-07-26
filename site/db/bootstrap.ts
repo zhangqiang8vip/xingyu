@@ -17,7 +17,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "5";
+  const schemaVersion = "7";
 
   try {
     const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
@@ -42,6 +42,15 @@ async function initialize() {
       color TEXT NOT NULL DEFAULT '#0071e3',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS spaces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      parent_id INTEGER,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       public_id TEXT NOT NULL UNIQUE,
@@ -50,6 +59,7 @@ async function initialize() {
       excerpt TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       category_id INTEGER NOT NULL,
+      space_id INTEGER,
       status TEXT NOT NULL DEFAULT 'draft',
       featured INTEGER NOT NULL DEFAULT 0,
       view_count INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +122,10 @@ async function initialize() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS categories_slug_uidx ON categories(slug)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS spaces_parent_slug_uidx ON spaces(parent_id, slug)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS spaces_root_slug_uidx ON spaces(slug) WHERE parent_id IS NULL"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS spaces_parent_sort_idx ON spaces(parent_id, sort_order, id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS spaces_updated_idx ON spaces(updated_at DESC, id DESC)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS posts_slug_uidx ON posts(slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS content_pages_slug_uidx ON content_pages(slug)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS posts_status_published_idx ON posts(status, published_at DESC)"),
@@ -149,11 +163,17 @@ async function initialize() {
   if (!(postColumns.results ?? []).some((column) => column.name === "public_id")) {
     await d1.prepare("ALTER TABLE posts ADD COLUMN public_id TEXT").run();
   }
+  if (!(postColumns.results ?? []).some((column) => column.name === "space_id")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN space_id INTEGER").run();
+  }
   const postsWithoutPublicId = await d1.prepare("SELECT id FROM posts WHERE public_id IS NULL OR public_id = ''").all<{ id: number }>();
   if (postsWithoutPublicId.results?.length) {
     await d1.batch(postsWithoutPublicId.results.map((post) => d1.prepare("UPDATE posts SET public_id = ? WHERE id = ?").bind(createPostPublicId(), post.id)));
   }
   await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS posts_public_id_uidx ON posts(public_id)").run();
+  await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_updated_idx ON posts(space_id, updated_at DESC, id DESC)").run();
+  await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_status_updated_idx ON posts(space_id, status, updated_at DESC, id DESC)").run();
+  await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_published_idx ON posts(space_id, published_at DESC, id DESC)").run();
   await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS post_slug_history_slug_uidx ON post_slug_history(slug)").run();
 
   const storedEnvironment = await d1.prepare("SELECT value FROM app_meta WHERE key = 'app_environment'")

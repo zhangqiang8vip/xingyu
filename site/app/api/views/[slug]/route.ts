@@ -6,7 +6,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   const payload = await request.json().catch(() => ({})) as { visitor?: string };
   if (!payload.visitor || payload.visitor.length > 160) return Response.json({ counted: false }, { status: 400 });
-  const post = await env.DB.prepare("SELECT id FROM posts WHERE (public_id = ? OR slug = ?) AND status = 'published'").bind(slug, slug).first<{ id: number }>();
+  const post = await env.DB.prepare("SELECT id FROM posts WHERE (public_id = ? OR slug = ?) AND status = 'published' AND space_id IS NULL").bind(slug, slug).first<{ id: number }>();
   if (!post) return Response.json({ counted: false }, { status: 404 });
   const viewedOn = new Date().toISOString().slice(0, 10);
   const visitorHash = await sha256(payload.visitor);

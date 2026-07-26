@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, like, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, like, lt, or, sql } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { cache } from "react";
 import { getDb } from ".";
@@ -19,7 +19,10 @@ export async function listPosts(filters: PostFilters = {}) {
   const db = getDb();
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(CONTENT_LIMITS.apiMaximum, Math.max(1, filters.pageSize ?? CONTENT_LIMITS.searchResults));
-  const conditions = [];
+  // This generic reader belongs to the public content surface. Private
+  // knowledge-space articles must only be reached through authenticated
+  // admin/MCP queries, even if a future caller forgets to add the boundary.
+  const conditions = [isNull(posts.spaceId)];
 
   if (filters.status && filters.status !== "all") conditions.push(eq(posts.status, filters.status));
   if (filters.category && filters.category !== "all") conditions.push(eq(categories.slug, filters.category));
@@ -56,7 +59,7 @@ export const getCategories = cache(async function getCategories() {
 export async function listHomePosts(category = "all", requestedLimit: number = CONTENT_LIMITS.homeDefault) {
   await ensureDatabase();
   const limit = Math.min(CONTENT_LIMITS.homeMaximum, Math.max(1, requestedLimit));
-  const conditions = [eq(posts.status, "published")];
+  const conditions = [eq(posts.status, "published"),isNull(posts.spaceId)];
   if (category !== "all") conditions.push(eq(categories.slug, category));
   return getDb().select({
     id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt, content: posts.content,
@@ -84,10 +87,11 @@ export async function getContentPage(slug: string) {
 export async function getAdminStats() {
   await ensureDatabase();
   const rows = await getDb().select({
-    total: sql<number>`count(*)`,
-    published: sql<number>`sum(case when ${posts.status} = 'published' then 1 else 0 end)`,
-    drafts: sql<number>`sum(case when ${posts.status} = 'draft' then 1 else 0 end)`,
-    views: sql<number>`coalesce(sum(${posts.viewCount}), 0)`,
+    total: sql<number>`sum(case when ${posts.spaceId} is null then 1 else 0 end)`,
+    published: sql<number>`sum(case when ${posts.spaceId} is null and ${posts.status} = 'published' then 1 else 0 end)`,
+    drafts: sql<number>`sum(case when ${posts.spaceId} is null and ${posts.status} = 'draft' then 1 else 0 end)`,
+    views: sql<number>`coalesce(sum(case when ${posts.spaceId} is null then ${posts.viewCount} else 0 end), 0)`,
+    privateArticles: sql<number>`sum(case when ${posts.spaceId} is not null then 1 else 0 end)`,
   }).from(posts);
   const row = rows[0];
   return {
@@ -95,6 +99,7 @@ export async function getAdminStats() {
     published: Number(row?.published ?? 0),
     drafts: Number(row?.drafts ?? 0),
     views: Number(row?.views ?? 0),
+    privateArticles: Number(row?.privateArticles ?? 0),
   };
 }
 
@@ -105,7 +110,7 @@ export async function getPostBySlug(slug: string) {
     content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
     categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
   }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
-    .where(and(eq(posts.slug, slug), eq(posts.status, "published"))).limit(1);
+    .where(and(eq(posts.slug, slug), eq(posts.status, "published"),isNull(posts.spaceId))).limit(1);
   return rows[0] ?? null;
 }
 
@@ -116,7 +121,7 @@ export async function getPostByPublicId(publicId: string) {
     content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
     categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
   }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
-    .where(and(eq(posts.publicId, publicId), eq(posts.status, "published"))).limit(1);
+    .where(and(eq(posts.publicId, publicId), eq(posts.status, "published"),isNull(posts.spaceId))).limit(1);
   return rows[0] ?? null;
 }
 
@@ -133,7 +138,7 @@ export async function resolvePublicPost(identifier: string) {
     content: posts.content, publishedAt: posts.publishedAt, viewCount: posts.viewCount,
     categoryName: categories.name, categorySlug: categories.slug, categoryColor: categories.color,
   }).from(posts).leftJoin(categories, eq(posts.categoryId, categories.id))
-    .where(and(eq(posts.id, history[0].postId), eq(posts.status, "published"))).limit(1);
+    .where(and(eq(posts.id, history[0].postId), eq(posts.status, "published"),isNull(posts.spaceId))).limit(1);
   return rows[0] ?? null;
 }
 
@@ -168,6 +173,7 @@ async function getAdjacentPublishedPost(publishedAt: string | null, id: number, 
     .leftJoin(categories, eq(posts.categoryId, categories.id))
     .where(and(
       eq(posts.status, "published"),
+      isNull(posts.spaceId),
       or(dateComparison, and(eq(posts.publishedAt, publishedAt), idComparison)),
     ));
   const rows = older
@@ -191,6 +197,8 @@ export type CursorPost = {
   categoryName: string | null;
   categorySlug: string | null;
   categoryColor: string | null;
+  spaceId: number | null;
+  spacePath: string | null;
 };
 
 type RawCursorPost = Omit<CursorPost, "featured"> & { featured: number };
@@ -201,6 +209,7 @@ type CursorFilters = {
   query?: string;
   category?: string;
   status?: "draft" | "published" | "all";
+  space?: "all"|"public"|"private"|number;
 };
 
 export async function listArchivePosts(filters: CursorFilters = {}) {
@@ -237,6 +246,13 @@ async function listPostsByCursor(filters: CursorFilters & { sort: "published" | 
     conditions.push("c.slug = ?");
     params.push(filters.category);
   }
+  if(filters.sort==="published")conditions.push("p.space_id IS NULL");
+  if(filters.space==="public")conditions.push("p.space_id IS NULL");
+  if(filters.space==="private")conditions.push("p.space_id IS NOT NULL");
+  if(typeof filters.space==="number"){
+    conditions.push("p.space_id = ?");
+    params.push(filters.space);
+  }
 
   const cursor = decodeCursor(filters.cursor);
   const sortColumn = filters.sort === "published" ? "p.published_at" : "p.updated_at";
@@ -249,7 +265,16 @@ async function listPostsByCursor(filters: CursorFilters & { sort: "published" | 
   const statement = env.DB.prepare(`SELECT
     p.id, p.public_id AS publicId, p.title, p.slug, p.excerpt, p.status, p.featured, p.view_count AS viewCount,
     p.published_at AS publishedAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
-    c.name AS categoryName, c.slug AS categorySlug, c.color AS categoryColor
+    c.name AS categoryName, c.slug AS categorySlug, c.color AS categoryColor,
+    p.space_id AS spaceId,
+    CASE WHEN p.space_id IS NULL THEN NULL ELSE (
+      WITH RECURSIVE ancestors(id,parent_id,name,depth) AS (
+        SELECT id,parent_id,name,0 FROM spaces WHERE id=p.space_id
+        UNION ALL
+        SELECT s.id,s.parent_id,s.name,ancestors.depth+1 FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
+      )
+      SELECT group_concat(name,' / ') FROM (SELECT name FROM ancestors ORDER BY depth DESC)
+    ) END AS spacePath
     ${from} ${where}
     ORDER BY ${sortColumn} DESC, p.id DESC
     LIMIT ?`).bind(...params, limit + 1);

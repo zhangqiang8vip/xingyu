@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const generatedMigration = async () => {
+  const directory = new URL("../drizzle/", import.meta.url);
+  const candidates = (await readdir(directory))
+    .filter((name) => /^0005_.+\.sql$/.test(name));
+  assert.equal(candidates.length, 1, "expected exactly one generated 0005 migration");
+  return readFile(new URL(candidates[0], directory), "utf8");
+};
 
 test("content, settings and view data are persisted in D1", async () => {
   const [schema, bootstrap, settingsRoute, pageRoute, viewRoute] = await Promise.all([
@@ -200,4 +207,96 @@ test("admin and markdown editor share the site theme palette", async () => {
   assert.match(editor,/vditorMermaidScript/);
   assert.match(editor,/wrappingWidth: 280/);
   assert.match(toggle,/xingyu:theme-change/);
+});
+
+test("knowledge spaces are durable, arbitrarily nested and isolated from the public blog", async () => {
+  const [
+    schema, bootstrap, migration, queries, spaces, postInput, postWrite,
+    admin, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute,
+  ] = await Promise.all([
+    source("db/schema.ts"), source("db/bootstrap.ts"), generatedMigration(),
+    source("db/queries.ts"), source("db/spaces.ts"), source("app/api/posts/post-input.ts"),
+    source("db/post-write.ts"), source("app/admin/AdminClient.tsx"),
+    source("app/admin/AdminSpacesPanel.tsx"), source("app/admin/AdminSpacePicker.tsx"),
+    source("app/api/posts/route.ts"), source("app/api/posts/[id]/route.ts"),
+    source("app/api/views/[slug]/route.ts"),
+  ]);
+  assert.match(schema,/spaces = sqliteTable\("spaces"/);
+  assert.match(schema,/parentId: integer\("parent_id"\)/);
+  assert.match(schema,/spaceId: integer\("space_id"\)/);
+  assert.match(bootstrap,/schemaVersion = "7"/);
+  assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
+  assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
+  assert.match(migration,/CREATE TABLE `spaces`/);
+  assert.match(migration,/spaces_root_slug_uidx/);
+  assert.match(migration,/ALTER TABLE `posts` ADD `space_id`/);
+  assert.match(spaces,/WITH RECURSIVE ancestors/);
+  assert.match(spaces,/WITH RECURSIVE descendants/);
+  assert.match(spaces,/空间不能移动到自己的下级空间/);
+  assert.match(spaces,/空间文章不能移动到知识空间根层/);
+  assert.match(spaces,/nextCursor/);
+  assert.match(postInput,/spaceId/);
+  assert.match(postInput,/spaceId===null&&Boolean\(payload\.featured\)/);
+  assert.match(postWrite,/validateSpace/);
+  assert.match(queries,/eq\(posts\.status, "published"\),isNull\(posts\.spaceId\)/);
+  assert.match(queries,/p\.space_id IS NULL/);
+  assert.match(postsRoute,/scope === "all" \? "all" : scope === "private" \? "private" : "public"/);
+  assert.match(postRoute,/hasOwnProperty\.call\(payload,"spaceId"\)\?payload\.spaceId:current\.spaceId/);
+  assert.match(viewsRoute,/space_id IS NULL/);
+  assert.match(admin,/文章管理[\s\S]*知识空间[\s\S]*接入设置/);
+  assert.match(admin,/私有知识文章 · 仅管理员与 MCP 可检索/);
+  assert.match(admin,/确认移出知识空间吗/);
+  assert.match(spacePanel,/顶级空间彼此独立/);
+  assert.match(spacePanel,/只展示当前层级/);
+  assert.match(spacePanel,/仅当前空间/);
+  assert.match(spacePanel,/包含子空间/);
+  assert.match(spacePanel,/继续加载/);
+  assert.match(spacePanel,/space-tree-mobile-backdrop/);
+  assert.match(spacePicker,/SpacePickerNode/);
+});
+
+test("knowledge-space APIs and MCP expose scoped search with auditable writes", async () => {
+  const [spacesApi, spaceApi, postsApi, mcp, activity] = await Promise.all([
+    source("app/api/spaces/route.ts"), source("app/api/spaces/[id]/route.ts"),
+    source("app/api/spaces/[id]/posts/route.ts"), source("worker/blog-mcp.ts"),
+    source("db/mcp-activity.ts"),
+  ]);
+  assert.match(spacesApi,/isAdminRequest/);
+  assert.match(spaceApi,/isAdminRequest/);
+  assert.match(postsApi,/isAdminRequest/);
+  for (const tool of ["list_spaces","get_space","create_space","update_space","move_space","delete_space"]) {
+    assert.ok(mcp.includes(`server.registerTool("${tool}"`),`missing MCP tool ${tool}`);
+  }
+  assert.match(mcp,/include_descendants/);
+  assert.match(mcp,/visibility:post\.spaceId\?"space":"public"/);
+  assert.match(mcp,/public_url: post\.status === "published"&&!post\.spaceId/);
+  assert.match(mcp,/recordSpaceActivitySafely/);
+  assert.match(mcp,/activityReceipt\("create_space"/);
+  assert.match(mcp,/activityReceipt\("move_space"/);
+  assert.match(mcp,/activityReceipt\("delete_space"/);
+  assert.match(activity,/recordMcpSpaceActivity/);
+  assert.match(activity,/row\.publicId\.startsWith\("space:"\)/);
+});
+
+test("admin global search covers every article and opens a pure frontstage preview", async () => {
+  const [admin, search, postsApi, studio] = await Promise.all([
+    source("app/admin/AdminClient.tsx"),
+    source("app/admin/AdminArticleSearch.tsx"),
+    source("app/api/posts/route.ts"),
+    source("app/admin/ArticleWritingStudio.tsx"),
+  ]);
+  assert.match(search,/scope:"all"/);
+  assert.match(search,/metaKey\|\|event\.ctrlKey/);
+  assert.match(search,/ArrowDown/);
+  assert.match(search,/ArrowUp/);
+  assert.match(search,/onPreview\(postId\)/);
+  assert.match(postsApi,/scope === "all" \? "all"/);
+  assert.match(admin,/setPreviewDraft\(data\.post\)/);
+  assert.match(admin,/setStudio\(null\);setForm\(null\);setPreviewDraft\(data\.post\)/);
+  assert.match(admin,/disabled=\{Boolean\(form\|\|studio\|\|previewDraft\)\}/);
+  assert.doesNotMatch(admin,/setForm\(data\.post\);setStudio\("reading"\)/);
+  assert.match(admin,/ArticlePurePreview/);
+  assert.match(studio,/function ArticlePurePreview/);
+  assert.match(studio,/纯阅读模式 · 不进入编辑器/);
+  assert.match(studio,/ArticleFrontstage draft=\{draft\}/);
 });

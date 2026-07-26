@@ -4,6 +4,7 @@ export type PostPayload = {
   excerpt: string;
   content: string;
   categoryId: number;
+  spaceId: number | null;
   status: "draft" | "published";
   featured: boolean;
   publishedAt: string | null;
@@ -11,14 +12,16 @@ export type PostPayload = {
 
 export function parsePostPayload(payload: Record<string, unknown>): PostPayload {
   const title = String(payload.title ?? "").trim();
+  const spaceId = Number.isInteger(Number(payload.spaceId)) && Number(payload.spaceId) > 0 ? Number(payload.spaceId) : null;
   return {
     title,
     slug: slugify(String(payload.slug ?? "") || title),
     excerpt: String(payload.excerpt ?? ""),
     content: String(payload.content ?? ""),
     categoryId: Number(payload.categoryId) || 1,
+    spaceId,
     status: payload.status === "published" ? "published" : "draft",
-    featured: Boolean(payload.featured),
+    featured: spaceId===null&&Boolean(payload.featured),
     publishedAt: normalizeDate(payload.publishedAt),
   };
 }

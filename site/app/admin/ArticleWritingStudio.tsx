@@ -5,7 +5,7 @@ import VditorEditor from "./VditorEditor";
 import { formatLongDate } from "../content-utils";
 
 type Mode="code"|"split"|"reading";
-export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published"};
+export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published";spaceId?:number|null;spacePath?:string};
 /** Keeps Markdown source and the real frontstage iframe on one reading progress. */
 export function useSplitScrollSync(rootRef:RefObject<HTMLElement|null>,enabled=true){
   useEffect(()=>{
@@ -123,6 +123,23 @@ export default function ArticleWritingStudio({draft,categoryName,categoryColor,a
   return <div className={`writing-studio mode-${mode}`} role="dialog" aria-modal="true" aria-label="沉浸式文章写作">
     <header><div className="writing-studio-brand"><i style={{background:categoryColor}}/><span>实时写作</span><b>{draft.title||"未命名文章"}</b></div><div className="writing-mode-switch" aria-label="写作方式"><button className={mode==="code"?"active":""} onClick={()=>setMode("code")}>源码</button><button className={mode==="split"?"active":""} onClick={()=>setMode("split")}>分屏</button><button className={mode==="reading"?"active":""} onClick={()=>setMode("reading")}>阅读</button></div><div className="writing-studio-actions"><span>内容实时保留在编辑表单</span><button onClick={onClose}>完成</button></div></header>
     <main>{mode!=="reading"&&<section className="writing-source"><div><span>MARKDOWN SOURCE</span><small>输入 / 使用指令 · Ctrl+V 粘贴图片</small></div><VditorEditor value={draft.content} onChange={onChange} previewMode="editor" autoFocus/></section>}{mode!=="code"&&<ArticleFrontstage key={draft.publicId ?? draft.id ?? "new-draft"} draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>}</main>
+  </div>;
+}
+
+export function ArticlePurePreview({draft,categoryName,categoryColor,authorName,avatarUrl,onClose}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;onClose:()=>void}){
+  useEffect(()=>{
+    const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};
+    window.addEventListener("keydown",close);
+    const overflow=document.body.style.overflow;
+    document.body.style.overflow="hidden";
+    return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=overflow};
+  },[onClose]);
+  return <div className="article-pure-preview" role="dialog" aria-modal="true" aria-label={`预览文章：${draft.title}`}>
+    <header>
+      <div><i style={{background:categoryColor}}/><span>{draft.spaceId?"私有知识预览":"真实前台预览"}</span><b>{draft.title||"未命名文章"}</b></div>
+      <div><small>纯阅读模式 · 不进入编辑器</small><button type="button" onClick={onClose}>完成</button></div>
+    </header>
+    <ArticleFrontstage draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>
   </div>;
 }
 

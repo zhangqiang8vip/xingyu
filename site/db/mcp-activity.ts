@@ -3,7 +3,16 @@ import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { mcpActivity } from "./schema";
 
-export type McpActivityAction = "create_draft" | "update_post" | "update_page" | "publish_post" | "unpublish_post";
+export type McpActivityAction =
+  | "create_draft"
+  | "update_post"
+  | "update_page"
+  | "publish_post"
+  | "unpublish_post"
+  | "create_space"
+  | "update_space"
+  | "move_space"
+  | "delete_space";
 
 type ActivityInput = {
   action: McpActivityAction;
@@ -57,6 +66,30 @@ export async function recordMcpPageActivity(input: {
   return activity;
 }
 
+export async function recordMcpSpaceActivity(input: {
+  action: Extract<McpActivityAction, "create_space" | "update_space" | "move_space" | "delete_space">;
+  space: { id: number; name: string };
+  beforeParentId?: number | null;
+  afterParentId?: number | null;
+  changedFields: string[];
+  summary: string;
+  clientLabel: string;
+}) {
+  await ensureDatabase();
+  const [activity] = await getDb().insert(mcpActivity).values({
+    action: input.action,
+    postId: input.space.id,
+    publicId: `space:${input.space.id}`,
+    title: input.space.name,
+    beforeStatus: input.beforeParentId === undefined ? null : `parent:${input.beforeParentId ?? "root"}`,
+    afterStatus: input.afterParentId === undefined ? null : `parent:${input.afterParentId ?? "root"}`,
+    changedFields: JSON.stringify(input.changedFields),
+    summary: input.summary,
+    clientLabel: input.clientLabel,
+  }).returning({ id: mcpActivity.id, createdAt: mcpActivity.createdAt });
+  return activity;
+}
+
 export async function listMcpActivity(limit: number) {
   await ensureDatabase();
   const rows = await getDb().select().from(mcpActivity)
@@ -65,7 +98,11 @@ export async function listMcpActivity(limit: number) {
   return rows.map((row) => ({
     id: row.id,
     action: row.action,
-    resource_type: row.publicId.startsWith("page:") ? "page" : "post",
+    resource_type: row.publicId.startsWith("page:")
+      ? "page"
+      : row.publicId.startsWith("space:")
+        ? "space"
+        : "post",
     public_id: row.publicId,
     title: row.title,
     before_status: row.beforeStatus,

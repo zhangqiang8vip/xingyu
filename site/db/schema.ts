@@ -9,6 +9,21 @@ export const categories = sqliteTable("categories", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("categories_slug_uidx").on(table.slug)]);
 
+export const spaces = sqliteTable("spaces", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  parentId: integer("parent_id"),
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("spaces_parent_slug_uidx").on(table.parentId, table.slug),
+  uniqueIndex("spaces_root_slug_uidx").on(table.slug).where(sql`${table.parentId} IS NULL`),
+  index("spaces_parent_sort_idx").on(table.parentId, table.sortOrder, table.id),
+  index("spaces_updated_idx").on(table.updatedAt, table.id),
+]);
+
 export const posts = sqliteTable("posts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   publicId: text("public_id").notNull(),
@@ -17,6 +32,7 @@ export const posts = sqliteTable("posts", {
   excerpt: text("excerpt").notNull().default(""),
   content: text("content").notNull().default(""),
   categoryId: integer("category_id").notNull(),
+  spaceId: integer("space_id"),
   status: text("status", { enum: ["draft", "published"] }).notNull().default("draft"),
   featured: integer("featured", { mode: "boolean" }).notNull().default(false),
   viewCount: integer("view_count").notNull().default(0),
@@ -30,6 +46,9 @@ export const posts = sqliteTable("posts", {
   index("posts_archive_cursor_idx").on(table.status, table.publishedAt, table.id),
   index("posts_category_status_idx").on(table.categoryId, table.status),
   index("posts_category_archive_cursor_idx").on(table.categoryId, table.status, table.publishedAt, table.id),
+  index("posts_space_updated_idx").on(table.spaceId, table.updatedAt, table.id),
+  index("posts_space_status_updated_idx").on(table.spaceId, table.status, table.updatedAt, table.id),
+  index("posts_space_published_idx").on(table.spaceId, table.publishedAt, table.id),
   index("posts_updated_idx").on(table.updatedAt),
   index("posts_admin_cursor_idx").on(table.updatedAt, table.id),
 ]);
