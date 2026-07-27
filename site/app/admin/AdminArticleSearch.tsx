@@ -19,11 +19,11 @@ export type AdminSearchPost = {
 
 export default function AdminArticleSearch({
   articleCount,
-  onPreview,
+  onBrowse,
   disabled=false,
 }:{
   articleCount:number;
-  onPreview:(postId:number)=>void;
+  onBrowse:(postId:number)=>void;
   disabled?:boolean;
 }){
   const [open,setOpen]=useState(false);
@@ -31,6 +31,7 @@ export default function AdminArticleSearch({
   const [rows,setRows]=useState<AdminSearchPost[]>([]);
   const [loading,setLoading]=useState(false);
   const [activeIndex,setActiveIndex]=useState(0);
+  const rootRef=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLInputElement>(null);
   const listRef=useRef<HTMLDivElement>(null);
   const beginSearch=useCallback(()=>{
@@ -57,13 +58,15 @@ export default function AdminArticleSearch({
     if(!open||disabled)return;
     const timer=window.setTimeout(()=>inputRef.current?.focus(),0);
     const closeOnEscape=(event:KeyboardEvent)=>{if(event.key==="Escape")setOpen(false)};
+    const closeOnOutside=(event:PointerEvent)=>{
+      if(!rootRef.current?.contains(event.target as Node))setOpen(false);
+    };
     window.addEventListener("keydown",closeOnEscape);
-    const overflow=document.body.style.overflow;
-    document.body.style.overflow="hidden";
+    window.addEventListener("pointerdown",closeOnOutside);
     return()=>{
       window.clearTimeout(timer);
       window.removeEventListener("keydown",closeOnEscape);
-      document.body.style.overflow=overflow;
+      window.removeEventListener("pointerdown",closeOnOutside);
     };
   },[disabled,open]);
 
@@ -94,9 +97,9 @@ export default function AdminArticleSearch({
   },[activeIndex]);
 
   const close=()=>setOpen(false);
-  const preview=(postId:number)=>{
+  const browse=(postId:number)=>{
     close();
-    onPreview(postId);
+    onBrowse(postId);
   };
   const onKeyDown=(event:React.KeyboardEvent<HTMLInputElement>)=>{
     if(event.key==="Escape"){event.preventDefault();close();return}
@@ -114,16 +117,16 @@ export default function AdminArticleSearch({
     }
     if(event.key==="Enter"&&rows[activeIndex]){
       event.preventDefault();
-      preview(rows[activeIndex].id);
+      browse(rows[activeIndex].id);
     }
   };
 
-  return <>
-    <button className="admin-article-search-trigger" type="button" disabled={disabled} onClick={beginSearch} aria-label="搜索全部文章">
+  return <div ref={rootRef} className={`admin-article-search${open?" active":""}`}>
+    {!open&&<button className="admin-article-search-trigger" type="button" disabled={disabled} onClick={beginSearch} aria-label="搜索全部文章">
       <i>⌕</i><span>搜索全部文章</span><kbd>⌘K</kbd>
-    </button>
-    {open&&!disabled&&<div className="admin-article-search-backdrop" onPointerDown={(event)=>event.target===event.currentTarget&&close()}>
-      <section className="admin-article-search-dialog" role="dialog" aria-modal="true" aria-label="搜索全部文章">
+    </button>}
+    {open&&!disabled&&
+      <section className="admin-article-search-dialog" role="dialog" aria-label="搜索全部文章">
         <header>
           <i>⌕</i>
           <input ref={inputRef} value={query} onChange={(event)=>setQuery(event.target.value)} onKeyDown={onKeyDown} placeholder="搜索标题、摘要、正文或 Slug" aria-label="搜索全部文章"/>
@@ -143,7 +146,7 @@ export default function AdminArticleSearch({
             className={index===activeIndex?"active":""}
             key={post.id}
             onMouseEnter={()=>setActiveIndex(index)}
-            onClick={()=>preview(post.id)}
+            onClick={()=>browse(post.id)}
           >
             <i style={{background:post.categoryColor??"#8e8e93"}}/>
             <span>
@@ -151,16 +154,16 @@ export default function AdminArticleSearch({
               <small>{post.spaceId?(post.spacePath||"私有知识空间"):`公开博客 · ${post.categoryName??"未分类"}`}</small>
             </span>
             <em>{post.status==="published"?(post.spaceId?"内容完成":"已发布"):"草稿"}</em>
-            <strong>预览 ↗</strong>
+            <strong>浏览 ↗</strong>
           </button>)}
           {!loading&&!rows.length&&<div className="admin-article-search-empty"><i>◇</i><b>没有找到相关文章</b><span>换一个关键词，或检查标题与正文内容。</span></div>}
           {loading&&!rows.length&&<div className="admin-article-search-loading"><i/><i/><i/><span>正在检索全部文章</span></div>}
         </div>
         <footer>
-          <span><kbd>↑</kbd><kbd>↓</kbd> 选择　<kbd>Enter</kbd> 纯预览</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd> 选择　<kbd>Enter</kbd> 正式浏览</span>
           <span>公开与私有共 {articleCount.toLocaleString()} 篇 · 最多展示 20 条</span>
         </footer>
       </section>
-    </div>}
-  </>;
+    }
+  </div>;
 }

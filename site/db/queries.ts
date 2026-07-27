@@ -150,6 +150,63 @@ export async function getPreviousPublishedPost(publishedAt: string | null, id: n
   return getAdjacentPublishedPost(publishedAt, id, "newer");
 }
 
+export type AdminReaderPost={
+  id:number;
+  publicId:string;
+  title:string;
+  slug:string;
+  excerpt:string;
+  content:string;
+  status:"draft"|"published";
+  viewCount:number;
+  publishedAt:string|null;
+  updatedAt:string;
+  categoryName:string|null;
+  categoryColor:string|null;
+  spaceId:number|null;
+  spacePath:string|null;
+};
+
+const adminReaderSelection=`SELECT
+  p.id,p.public_id AS publicId,p.title,p.slug,p.excerpt,p.content,p.status,
+  p.view_count AS viewCount,p.published_at AS publishedAt,p.updated_at AS updatedAt,
+  c.name AS categoryName,c.color AS categoryColor,p.space_id AS spaceId,
+  CASE WHEN p.space_id IS NULL THEN NULL ELSE (
+    WITH RECURSIVE ancestors(id,parent_id,name,depth) AS (
+      SELECT id,parent_id,name,0 FROM spaces WHERE id=p.space_id
+      UNION ALL
+      SELECT s.id,s.parent_id,s.name,ancestors.depth+1 FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
+    )
+    SELECT group_concat(name,' / ') FROM (SELECT name FROM ancestors ORDER BY depth DESC)
+  ) END AS spacePath
+  FROM posts p LEFT JOIN categories c ON p.category_id=c.id`;
+
+/** Authenticated reading uses the same shape as public reading without weakening public queries. */
+export async function getAdminReaderPost(identifier:string){
+  await ensureDatabase();
+  return await env.DB.prepare(`${adminReaderSelection} WHERE p.public_id=? OR p.slug=? LIMIT 1`)
+    .bind(identifier,identifier).first<AdminReaderPost>();
+}
+
+export async function getPreviousAdminPost(updatedAt:string,id:number){
+  return getAdjacentAdminPost(updatedAt,id,"newer");
+}
+
+export async function getNextAdminPost(updatedAt:string,id:number){
+  return getAdjacentAdminPost(updatedAt,id,"older");
+}
+
+async function getAdjacentAdminPost(updatedAt:string,id:number,direction:"older"|"newer"){
+  await ensureDatabase();
+  const older=direction==="older";
+  const operator=older?"<":">";
+  const order=older?"DESC":"ASC";
+  return await env.DB.prepare(`${adminReaderSelection}
+    WHERE p.updated_at ${operator} ? OR (p.updated_at=? AND p.id ${operator} ?)
+    ORDER BY p.updated_at ${order},p.id ${order} LIMIT 1`)
+    .bind(updatedAt,updatedAt,id).first<AdminReaderPost>();
+}
+
 const adjacentPostSelection = {
   id: posts.id,
   publicId: posts.publicId,

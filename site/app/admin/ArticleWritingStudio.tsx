@@ -126,23 +126,6 @@ export default function ArticleWritingStudio({draft,categoryName,categoryColor,a
   </div>;
 }
 
-export function ArticlePurePreview({draft,categoryName,categoryColor,authorName,avatarUrl,onClose}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string;onClose:()=>void}){
-  useEffect(()=>{
-    const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};
-    window.addEventListener("keydown",close);
-    const overflow=document.body.style.overflow;
-    document.body.style.overflow="hidden";
-    return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=overflow};
-  },[onClose]);
-  return <div className="article-pure-preview" role="dialog" aria-modal="true" aria-label={`预览文章：${draft.title}`}>
-    <header>
-      <div><i style={{background:categoryColor}}/><span>{draft.spaceId?"私有知识预览":"真实前台预览"}</span><b>{draft.title||"未命名文章"}</b></div>
-      <div><small>纯阅读模式 · 不进入编辑器</small><button type="button" onClick={onClose}>完成</button></div>
-    </header>
-    <ArticleFrontstage draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>
-  </div>;
-}
-
 /** Shared by the compact editor and the immersive studio: never fork public preview markup. */
 export function ArticleFrontstage({draft,categoryName,categoryColor,authorName,avatarUrl}:{draft:ArticleDraft;categoryName:string;categoryColor:string;authorName:string;avatarUrl:string}){
   const frame=useRef<HTMLIFrameElement>(null);

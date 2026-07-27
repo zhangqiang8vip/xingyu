@@ -6,9 +6,9 @@ import { CONTENT_LIMITS } from "./site-config";
 import { formatShortDate, isEditableTarget } from "./content-utils";
 import { postPath } from "./post-path";
 
-export type SearchPost = { id:number; publicId:string; title:string; slug:string; excerpt:string; publishedAt:string | null; viewCount:number; categoryName:string | null; categoryColor:string | null };
+export type SearchPost = { id:number; publicId:string; title:string; slug:string; excerpt:string; publishedAt:string | null; viewCount:number; categoryName:string | null; categoryColor:string | null; status?:"draft"|"published";spaceId?:number|null;spacePath?:string|null };
 
-export default function IslandSearch({ initialText, excludeSlug, onSelect, variant="navigation" }: { initialText:string; excludeSlug?:string; onSelect?:(post:SearchPost)=>void; variant?:"navigation"|"reader" }) {
+export default function IslandSearch({ initialText, excludeSlug, onSelect, variant="navigation",scope="public" }: { initialText:string; excludeSlug?:string; onSelect?:(post:SearchPost)=>void; variant?:"navigation"|"reader";scope?:"public"|"admin" }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -73,7 +73,10 @@ export default function IslandSearch({ initialText, excludeSlug, onSelect, varia
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/archive?q=${encodeURIComponent(query.trim())}&category=all&limit=${CONTENT_LIMITS.searchResults}`, { signal:controller.signal });
+        const endpoint=scope==="admin"
+          ?`/api/posts?scope=all&q=${encodeURIComponent(query.trim())}&category=all&status=all&pageSize=${CONTENT_LIMITS.searchResults}`
+          :`/api/archive?q=${encodeURIComponent(query.trim())}&category=all&limit=${CONTENT_LIMITS.searchResults}`;
+        const response = await fetch(endpoint, { signal:controller.signal });
         if (!response.ok) throw new Error("search failed");
         const data = await response.json() as { rows: SearchPost[] };
         setRows(excludeSlug ? data.rows.filter((row) => row.slug !== excludeSlug) : data.rows);
@@ -83,7 +86,7 @@ export default function IslandSearch({ initialText, excludeSlug, onSelect, varia
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 120);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [excludeSlug, open, query]);
+  }, [excludeSlug, open, query, scope]);
 
   useEffect(() => {
     const list = resultsRef.current;
@@ -99,7 +102,7 @@ export default function IslandSearch({ initialText, excludeSlug, onSelect, varia
     if (!post) return;
     dismiss();
     if (onSelect) return onSelect(post);
-    transitionTo(postPath(post));
+    transitionTo(scope==="admin"?`/admin/reader/${encodeURIComponent(post.publicId)}`:postPath(post));
   };
   const hovered = rows.find((row) => row.slug === hoveredSlug);
 

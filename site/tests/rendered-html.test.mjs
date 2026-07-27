@@ -59,14 +59,15 @@ test("article routes use stable public ids and retain historical slugs", async (
 });
 
 test("public pages consume editable settings and shared presentation helpers", async () => {
-  const [home, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
-    source("app/page.tsx"), source("app/about/page.tsx"), source("app/posts/PostPageView.tsx"),
+  const [home, homeExperience, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
+    source("app/page.tsx"), source("app/BlogHomeExperience.tsx"), source("app/about/page.tsx"), source("app/posts/PostPageView.tsx"),
     source("app/layout.tsx"), source("app/admin/AdminClient.tsx"), source("app/SiteNavigation.tsx"),
     source("app/content-utils.ts"),
   ]);
   assert.match(home, /getSiteSettings/);
   assert.match(home, /settings\.homePostLimit/);
-  assert.match(home, /estimateReadingMinutes\(featured\.content\)/);
+  assert.match(home, /<BlogHomeExperience/);
+  assert.match(homeExperience, /estimateReadingMinutes\(post\.content\)/);
   assert.match(contentUtils, /const longDateFormatter = new Intl\.DateTimeFormat/);
   assert.match(contentUtils, /export function estimateReadingMinutes/);
   assert.match(home, /<SiteNavigation/);
@@ -133,24 +134,28 @@ test("admin search cancels stale work and avoids refetching stable stats", async
 });
 
 test("admin previews unsaved content through the real public pages", async () => {
-  const [admin, homeSettings, aboutEditor, studio, previewEntry, vditor, livePreview, bridge, postPage] = await Promise.all([
-    source("app/admin/AdminClient.tsx"), source("app/admin/AdminSettingsPanel.tsx"),
+  const [admin, sidebar, articles, articleEditor, homeSettings, aboutEditor, studio, previewEntry, vditor, livePreview, bridge, postPage] = await Promise.all([
+    source("app/admin/AdminClient.tsx"), source("app/admin/AdminSidebar.tsx"),
+    source("app/admin/AdminArticlesPanel.tsx"), source("app/admin/AdminArticleEditor.tsx"),
+    source("app/admin/AdminSettingsPanel.tsx"),
     source("app/admin/AdminPageEditor.tsx"), source("app/admin/ArticleWritingStudio.tsx"),
     source("app/admin/article-preview/page.tsx"), source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
     source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
   ]);
-  assert.ok(admin.indexOf("首页设置") < admin.indexOf("文章管理"));
-  assert.ok(admin.indexOf("文章管理") < admin.indexOf("接入设置"));
-  assert.ok(admin.indexOf("接入设置") < admin.indexOf("关于设置"));
+  assert.ok(sidebar.indexOf('label:"浏览"') < sidebar.indexOf('label:"文章管理"'));
+  assert.ok(sidebar.indexOf('label:"文章管理"') < sidebar.indexOf('label:"知识空间"'));
+  assert.ok(sidebar.indexOf('label:"知识空间"') < sidebar.indexOf('label:"首页设置"'));
+  assert.ok(sidebar.indexOf('label:"首页设置"') < sidebar.indexOf('label:"接入设置"'));
+  assert.ok(sidebar.indexOf('label:"接入设置"') < sidebar.indexOf('label:"关于设置"'));
   assert.match(homeSettings, /HomeLivePreview settings=\{form\}/);
   assert.match(aboutEditor, /ContentPageLivePreview page=\{form\}/);
-  assert.match(admin, /setStudio\("reading"\)/);
-  assert.match(admin, /ArticleFrontstage/);
+  assert.match(articleEditor, /onOpenStudio\("reading"\)/);
+  assert.match(articleEditor, /ArticleFrontstage/);
   assert.match(admin, /useSplitScrollSync/);
   assert.match(admin, /articleEditorPreviewRef/);
-  assert.match(admin, /previewMode="editor"/);
-  assert.match(admin, /onClick=\{\(\) => preview\(post\)\}/);
-  assert.match(admin, /setStudio\("split"\)/);
+  assert.match(articleEditor, /previewMode="editor"/);
+  assert.match(articles, /onBrowse\(post\.id\)/);
+  assert.match(articleEditor, /onOpenStudio\("split"\)/);
   assert.match(studio, /type Mode="code"\|"split"\|"reading"/);
   assert.match(studio, /writing-frontstage-frame/);
   assert.match(studio, /export function ArticleFrontstage/);
@@ -212,11 +217,12 @@ test("admin and markdown editor share the site theme palette", async () => {
 test("knowledge spaces are durable, arbitrarily nested and isolated from the public blog", async () => {
   const [
     schema, bootstrap, migration, queries, spaces, postInput, postWrite,
-    admin, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute,
+    admin, articleEditor, sidebar, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute,
   ] = await Promise.all([
     source("db/schema.ts"), source("db/bootstrap.ts"), generatedMigration(),
     source("db/queries.ts"), source("db/spaces.ts"), source("app/api/posts/post-input.ts"),
-    source("db/post-write.ts"), source("app/admin/AdminClient.tsx"),
+    source("db/post-write.ts"), source("app/admin/AdminClient.tsx"), source("app/admin/AdminArticleEditor.tsx"),
+    source("app/admin/AdminSidebar.tsx"),
     source("app/admin/AdminSpacesPanel.tsx"), source("app/admin/AdminSpacePicker.tsx"),
     source("app/api/posts/route.ts"), source("app/api/posts/[id]/route.ts"),
     source("app/api/views/[slug]/route.ts"),
@@ -243,8 +249,8 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(postsRoute,/scope === "all" \? "all" : scope === "private" \? "private" : "public"/);
   assert.match(postRoute,/hasOwnProperty\.call\(payload,"spaceId"\)\?payload\.spaceId:current\.spaceId/);
   assert.match(viewsRoute,/space_id IS NULL/);
-  assert.match(admin,/文章管理[\s\S]*知识空间[\s\S]*接入设置/);
-  assert.match(admin,/私有知识文章 · 仅管理员与 MCP 可检索/);
+  assert.match(sidebar,/文章管理[\s\S]*知识空间[\s\S]*接入设置/);
+  assert.match(articleEditor,/私有知识文章 · 仅管理员与 MCP 可检索/);
   assert.match(admin,/确认移出知识空间吗/);
   assert.match(spacePanel,/顶级空间彼此独立/);
   assert.match(spacePanel,/只展示当前层级/);
@@ -278,25 +284,36 @@ test("knowledge-space APIs and MCP expose scoped search with auditable writes", 
   assert.match(activity,/row\.publicId\.startsWith\("space:"\)/);
 });
 
-test("admin global search covers every article and opens a pure frontstage preview", async () => {
-  const [admin, search, postsApi, studio] = await Promise.all([
+test("admin global search covers every article through the shared authenticated reader", async () => {
+  const [admin, search, postsApi, modal, browse, homeExperience, readerApi, readerPage, postView] = await Promise.all([
     source("app/admin/AdminClient.tsx"),
     source("app/admin/AdminArticleSearch.tsx"),
     source("app/api/posts/route.ts"),
-    source("app/admin/ArticleWritingStudio.tsx"),
+    source("app/ModalPostLink.tsx"),
+    source("app/admin/AdminBrowsePanel.tsx"),
+    source("app/BlogHomeExperience.tsx"),
+    source("app/api/reader/[slug]/route.ts"),
+    source("app/admin/reader/[publicId]/page.tsx"),
+    source("app/posts/PostPageView.tsx"),
   ]);
   assert.match(search,/scope:"all"/);
   assert.match(search,/metaKey\|\|event\.ctrlKey/);
   assert.match(search,/ArrowDown/);
   assert.match(search,/ArrowUp/);
-  assert.match(search,/onPreview\(postId\)/);
+  assert.match(search,/onBrowse\(postId\)/);
   assert.match(postsApi,/scope === "all" \? "all"/);
-  assert.match(admin,/setPreviewDraft\(data\.post\)/);
-  assert.match(admin,/setStudio\(null\);setForm\(null\);setPreviewDraft\(data\.post\)/);
-  assert.match(admin,/disabled=\{Boolean\(form\|\|studio\|\|previewDraft\)\}/);
+  assert.match(admin,/xingyu:admin-reader-open/);
+  assert.match(admin,/controllerOnly readerScope="admin"/);
+  assert.match(admin,/disabled=\{Boolean\(form\|\|studio\)\}/);
   assert.doesNotMatch(admin,/setForm\(data\.post\);setStudio\("reading"\)/);
-  assert.match(admin,/ArticlePurePreview/);
-  assert.match(studio,/function ArticlePurePreview/);
-  assert.match(studio,/纯阅读模式 · 不进入编辑器/);
-  assert.match(studio,/ArticleFrontstage draft=\{draft\}/);
+  assert.match(browse,/<BlogHomeExperience/);
+  assert.match(homeExperience,/readerScope=\{admin\?"admin":"public"\}/);
+  assert.match(modal,/scope=admin/);
+  assert.match(modal,/xingyu:admin-reader-open/);
+  assert.match(readerApi,/isAdminRequest/);
+  assert.match(readerApi,/getAdminReaderPost/);
+  assert.match(readerPage,/getAdminIdentity/);
+  assert.match(readerPage,/readerScope="admin"/);
+  assert.match(postView,/getPreviousAdminPost/);
+  assert.match(postView,/getNextAdminPost/);
 });

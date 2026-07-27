@@ -8,6 +8,7 @@ import { postPath } from "./post-path";
 import MarkdownRenderer from "./MarkdownRenderer";
 
 type ReaderPost = {
+  id: number;
   publicId: string;
   title: string;
   slug: string;
@@ -17,6 +18,9 @@ type ReaderPost = {
   viewCount: number;
   categoryName: string | null;
   categoryColor: string | null;
+  status?: "draft" | "published";
+  spaceId?: number | null;
+  spacePath?: string | null;
 };
 
 type ReaderNeighbor = Omit<ReaderPost, "content" | "viewCount">;
@@ -26,9 +30,15 @@ type ReaderResponse = {
   previousPost: ReaderNeighbor | null;
   nextPost: ReaderNeighbor | null;
 };
-type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & { publicId: string; slug: string };
+type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & {
+  publicId:string;
+  slug:string;
+  readerScope?:"public"|"admin";
+  controllerOnly?:boolean;
+  onEdit?:(postId:number)=>void;
+};
 
-export default function ModalPostLink({ publicId, slug, children, onClick, ...props }: Props) {
+export default function ModalPostLink({ publicId, slug, readerScope="public", controllerOnly=false, onEdit, children, onClick, ...props }: Props) {
   const [open, setOpen] = useState(false);
   const [activePublicId, setActivePublicId] = useState(publicId);
   const [post, setPost] = useState<ReaderPost | null>(null);
@@ -89,7 +99,8 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    fetch(`/api/reader/${encodeURIComponent(activePublicId)}`, { signal: controller.signal })
+    const scope=readerScope==="admin"?"?scope=admin":"";
+    fetch(`/api/reader/${encodeURIComponent(activePublicId)}${scope}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("读取失败");
         const data = await response.json() as ReaderResponse;
@@ -102,7 +113,20 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
         if (!(nextError instanceof DOMException && nextError.name === "AbortError")) setError("文章暂时无法打开，请稍后再试。");
       });
     return () => controller.abort();
-  }, [activePublicId, open]);
+  }, [activePublicId, open, readerScope]);
+
+  useEffect(()=>{
+    if(!controllerOnly)return;
+    const openRequested=(event:Event)=>{
+      const requested=(event as CustomEvent<{publicId?:string}>).detail?.publicId;
+      if(!requested)return;
+      resetReaderState();
+      setActivePublicId(requested);
+      setOpen(true);
+    };
+    window.addEventListener("xingyu:admin-reader-open",openRequested);
+    return()=>window.removeEventListener("xingyu:admin-reader-open",openRequested);
+  },[controllerOnly,resetReaderState]);
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +161,7 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
   }, [open]);
 
   useEffect(() => {
-    if (!open || !post) return;
+    if (!open || !post || readerScope==="admin") return;
     const timer = window.setTimeout(() => {
       const storageKey = "xingyu-reader-id";
       let visitor = localStorage.getItem(storageKey);
@@ -153,7 +177,7 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
       });
     }, 1800);
     return () => window.clearTimeout(timer);
-  }, [open, post]);
+  }, [open, post, readerScope]);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -325,14 +349,15 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
   };
 
   return <>
-    <a {...props} href={postPath({ publicId, slug })} onClick={openReader}>{children}</a>
+    {!controllerOnly&&<a {...props} href={readerScope==="admin"?`/admin/reader/${encodeURIComponent(publicId)}`:postPath({publicId,slug})} onClick={openReader}>{children}</a>}
     {open && <div className="reader-modal" role="dialog" aria-modal="true" aria-label={post?.title ?? "正在打开文章"} onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <div className="reader-layout" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
        <section className="reader-panel">
         <header className="reader-toolbar">
           <div><i /><span>沉浸阅读</span></div>
           {post && <button className="reader-toolbar-title" type="button" onClick={returnToTop} aria-label={`${post.title}，已阅读 ${Math.round(readingProgress * 100)}%，返回文章顶部`} title="返回文章顶部"><span>{post.title}</span><i>↑</i><b>{Math.round(readingProgress * 100)}%</b></button>}
-          {post && <IslandSearch variant="reader" initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); setActivePublicId(result.publicId); }} />}
+          {post && <IslandSearch variant="reader" scope={readerScope} initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); setActivePublicId(result.publicId); }} />}
+          {post&&readerScope==="admin"&&onEdit&&<button className="reader-toolbar-edit" type="button" onClick={()=>{setOpen(false);onEdit(post.id)}}>编辑</button>}
           <button className="reader-toolbar-close" type="button" onClick={() => setOpen(false)} autoFocus aria-label="关闭阅读弹窗">×</button>
           <span className="reader-toolbar-progress" style={{ "--reader-progress": readingProgress } as React.CSSProperties} aria-hidden="true" />
         </header>
@@ -345,7 +370,7 @@ export default function ModalPostLink({ publicId, slug, children, onClick, ...pr
         {post && <>
           {tocItems.length > 0 && <button className={`reader-toc-toggle ${tocVisible ? "visible" : ""}`} type="button" onClick={() => setTocOpen((value) => !value)} aria-label="打开文章目录" aria-expanded={tocOpen}>目录</button>}
           <div className="reader-scroll" ref={scrollRef}>
-            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt)}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span></div></header>
+            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{readerScope==="admin"?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span>{readerScope==="admin"&&<><i/><span>{post.spaceId?"私有知识":post.status==="draft"?"草稿":"公开文章"}</span></>}</div></header>
             <article className="reader-prose markdown-body" ref={articleRef}><MarkdownRenderer>{post.content}</MarkdownRenderer><ArticleEndMark /></article>
             <section className="reader-neighbors" aria-label="上一篇和下一篇">
               <header><small>KEEP READING</small><h2>继续阅读</h2></header>

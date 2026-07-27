@@ -18,7 +18,7 @@ type NeighborPost = {
 
 type Direction = "previous" | "next";
 
-export default function PostSideNavigation({ previousPost, nextPost }: { previousPost: NeighborPost | null; nextPost: NeighborPost | null }) {
+export default function PostSideNavigation({ previousPost, nextPost, readerScope="public" }: { previousPost: NeighborPost | null; nextPost: NeighborPost | null;readerScope?:"public"|"admin" }) {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
   const [preview, setPreview] = useState<Direction | null>(null);
@@ -28,9 +28,9 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
   const rootRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (previousPost) router.prefetch(postPath(previousPost));
-    if (nextPost) router.prefetch(postPath(nextPost));
-  }, [nextPost, previousPost, router]);
+    if (previousPost) router.prefetch(readerScope==="admin"?`/admin/reader/${previousPost.publicId}`:postPath(previousPost));
+    if (nextPost) router.prefetch(readerScope==="admin"?`/admin/reader/${nextPost.publicId}`:postPath(nextPost));
+  }, [nextPost, previousPost, readerScope, router]);
 
   useEffect(() => {
     let frame = 0;
@@ -106,14 +106,15 @@ export default function PostSideNavigation({ previousPost, nextPost }: { previou
   };
 
   return <aside ref={rootRef} className={`post-side-navigation ${visible ? "visible" : ""}`} aria-label="上一篇和下一篇">
-    {previousPost && <SideItem direction="previous" post={previousPost} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
-    {nextPost && <SideItem direction="next" post={nextPost} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
+    {previousPost && <SideItem direction="previous" post={previousPost} readerScope={readerScope} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
+    {nextPost && <SideItem direction="next" post={nextPost} readerScope={readerScope} preview={preview} setPreview={setPreview} beginLongPress={beginLongPress} cancelLongPress={cancelLongPress} stopLongPressNavigation={stopLongPressNavigation} />}
   </aside>;
 }
 
-function SideItem({ direction, post, preview, setPreview, beginLongPress, cancelLongPress, stopLongPressNavigation }: {
+function SideItem({ direction, post, readerScope, preview, setPreview, beginLongPress, cancelLongPress, stopLongPressNavigation }: {
   direction: Direction;
   post: NeighborPost;
+  readerScope:"public"|"admin";
   preview: Direction | null;
   setPreview: (direction: Direction | null) => void;
   beginLongPress: (event: ReactPointerEvent, direction: Direction) => void;
@@ -123,12 +124,12 @@ function SideItem({ direction, post, preview, setPreview, beginLongPress, cancel
   const previous = direction === "previous";
   const open = preview === direction;
   return <div className={`post-side-item ${direction} ${open ? "previewing" : ""}`} onMouseEnter={() => setPreview(direction)} onMouseLeave={() => setPreview(null)} onFocus={() => setPreview(direction)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPreview(null); }}>
-    <ModalPostLink className="post-side-trigger" publicId={post.publicId} slug={post.slug} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
+    <ModalPostLink className="post-side-trigger" readerScope={readerScope} publicId={post.publicId} slug={post.slug} data-route-direction={previous ? "left" : "right"} onPointerDown={(event) => beginLongPress(event, direction)} onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={(event) => { if (event.pointerType !== "mouse") cancelLongPress(); }} onContextMenu={(event) => event.preventDefault()} onClick={stopLongPressNavigation} aria-label={`${previous ? "上一篇" : "下一篇"}：${post.title}`} aria-expanded={open}>
       <i>{previous ? "←" : "→"}</i><span>{previous ? "上一篇" : "下一篇"}</span>
     </ModalPostLink>
     {open && <div className="post-side-preview" style={{ "--preview-color": post.categoryColor ?? "#0071e3" } as React.CSSProperties}>
       <button type="button" onClick={() => setPreview(null)} aria-label="关闭预览">×</button>
-      <ModalPostLink publicId={post.publicId} slug={post.slug}>
+      <ModalPostLink readerScope={readerScope} publicId={post.publicId} slug={post.slug}>
         <small><i />{post.categoryName}</small>
         <b>{post.title}</b>
         <p>{post.excerpt}</p>
