@@ -47,6 +47,13 @@ function languageLabel(language: string): string {
   return names[language] || language.toUpperCase();
 }
 
+function attachmentDetails(href: string | undefined, title: string | undefined, children: ReactNode) {
+  if (!href || !/^\/api\/attachments\/att_[a-f0-9]{32}\//i.test(href)) return null;
+  const name = readNodeText(children) || decodeURIComponent(href.split("/").pop() || "附件");
+  const extension = name.includes(".") ? name.split(".").pop()!.toUpperCase() : "FILE";
+  return { name, extension, metadata: title || "博客附件" };
+}
+
 function remarkXingyuDirectives() {
   return (tree: Root) => {
     visit(tree, "containerDirective", (node) => {
@@ -86,6 +93,15 @@ export default function MarkdownRenderer({ children }: { children: string }) {
       rehypeKatex,
     ]}
     components={{
+      a({ href, title, children: linkChildren, ...props }) {
+        const attachment = attachmentDetails(href, title, linkChildren);
+        if (!attachment) return <a href={href} title={title} {...props}>{linkChildren}</a>;
+        return <a className="md-attachment-card" href={href} title={`打开 ${attachment.name}`} target="_blank" rel="noreferrer" {...props}>
+          <span className="md-attachment-kind" aria-hidden="true">{attachment.extension.slice(0, 5)}</span>
+          <span className="md-attachment-copy"><strong>{attachment.name}</strong><small>{attachment.metadata}</small></span>
+          <span className="md-attachment-action">{attachment.extension === "PDF" ? "预览" : "下载"} <i>↗</i></span>
+        </a>;
+      },
       pre({ children: preChildren, node, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");
         const language = languageFromPreNode(node) || codeLanguage(preChildren);

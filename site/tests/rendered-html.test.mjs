@@ -230,7 +230,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "7"/);
+  assert.match(bootstrap,/schemaVersion = "8"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -316,4 +316,28 @@ test("admin global search covers every article through the shared authenticated 
   assert.match(readerPage,/readerScope="admin"/);
   assert.match(postView,/getPreviousAdminPost/);
   assert.match(postView,/getNextAdminPost/);
+});
+
+test("attachments inherit article visibility and are available to editors and MCP", async () => {
+  const [schema, bootstrap, attachments, uploadRoute, downloadRoute, renderer, editor, mcp] = await Promise.all([
+    source("db/schema.ts"),
+    source("db/bootstrap.ts"),
+    source("db/attachments.ts"),
+    source("app/api/attachments/route.ts"),
+    source("app/api/attachments/[publicId]/[...name]/route.ts"),
+    source("app/MarkdownRenderer.tsx"),
+    source("app/admin/VditorEditor.tsx"),
+    source("worker/blog-mcp.ts"),
+  ]);
+  assert.match(schema, /attachments = sqliteTable\("attachments"/);
+  assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS attachments/);
+  assert.match(attachments, /bindMarkdownAttachments/);
+  assert.match(attachments, /MAX_ATTACHMENT_BYTES = 25 \* 1024 \* 1024/);
+  assert.match(uploadRoute, /isAdminRequest/);
+  assert.match(downloadRoute, /postStatus === "published" && attachment\.postSpaceId === null/);
+  assert.match(renderer, /md-attachment-card/);
+  assert.match(editor, /attachments&&<label className=/);
+  for (const tool of ["upload_attachment", "list_attachments", "download_attachment"]) {
+    assert.ok(mcp.includes(`server.registerTool("${tool}"`), `missing MCP attachment tool ${tool}`);
+  }
 });

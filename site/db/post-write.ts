@@ -4,6 +4,7 @@ import { ensureDatabase } from "./bootstrap";
 import { createPostPublicId } from "./public-id";
 import { postSlugHistory, posts, spaces } from "./schema";
 import type { PostPayload } from "../app/api/posts/post-input";
+import { bindMarkdownAttachments } from "./attachments";
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_SLUG_LENGTH = 180;
@@ -49,8 +50,9 @@ export async function createPostRecord(input: PostPayload) {
     .limit(1);
   if (historical[0]) throw new PostWriteError("该 Slug 曾被使用，请换一个地址", 409);
 
+  let post: typeof posts.$inferSelect | undefined;
   try {
-    const [post] = await getDb().insert(posts).values({
+    [post] = await getDb().insert(posts).values({
       ...input,
       publicId: createPostPublicId(),
       publishedAt: input.status === "published"
@@ -58,11 +60,12 @@ export async function createPostRecord(input: PostPayload) {
         : null,
     }).returning();
     if (!post) throw new PostWriteError("文章创建失败", 409);
-    return post;
   } catch (error) {
     if (error instanceof PostWriteError) throw error;
     throw new PostWriteError("Slug 已存在，请换一个地址", 409);
   }
+  await bindAttachmentsOrThrow(post.id, post.content);
+  return post;
 }
 
 export async function getWritablePost(identifier: string | number) {
@@ -89,6 +92,7 @@ export async function updatePostRecord(id: number, input: PostPayload) {
     .limit(1);
   if (!current[0]) throw new PostWriteError("文章不存在", 404);
 
+  let post: typeof posts.$inferSelect | undefined;
   try {
     if (input.slug !== current[0].slug) {
       const historical = await getDb()
@@ -107,15 +111,24 @@ export async function updatePostRecord(id: number, input: PostPayload) {
     const publishedAt = input.status === "published"
       ? input.publishedAt ?? current[0].publishedAt ?? new Date().toISOString()
       : current[0].publishedAt;
-    const [post] = await getDb().update(posts).set({
+    [post] = await getDb().update(posts).set({
       ...input,
       publishedAt,
       updatedAt: new Date().toISOString(),
     }).where(eq(posts.id, id)).returning();
     if (!post) throw new PostWriteError("文章不存在", 404);
-    return post;
   } catch (error) {
     if (error instanceof PostWriteError) throw error;
     throw new PostWriteError("保存失败，请检查标题和 Slug", 409);
+  }
+  await bindAttachmentsOrThrow(post.id, post.content);
+  return post;
+}
+
+async function bindAttachmentsOrThrow(postId: number, content: string) {
+  try {
+    await bindMarkdownAttachments(postId, content);
+  } catch {
+    throw new PostWriteError("文章已保存，但附件关联失败；请再次保存完成关联", 409);
   }
 }

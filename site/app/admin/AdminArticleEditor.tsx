@@ -78,7 +78,7 @@ export default function AdminArticleEditor({
         <section className="editor-section writing-section">
           <div className="editor-section-title"><span>02</span><div><b>正文内容</b><small>专注写作，右侧同步预览</small></div><button className="writing-launch" type="button" onClick={()=>onOpenStudio("split")}><i>↗</i> 打开沉浸写作</button></div>
           <div className="md-field"><div className="md-field-head"><span>Markdown</span><span className="paste-status">输入 / 查看指令 · Ctrl+V 粘贴图片 · 右侧实时预览</span></div><div ref={previewRef} className="article-editor-workspace">
-            <VditorEditor value={form.content} onChange={(content)=>onChange({...form,content})} previewMode="editor"/>
+            <VditorEditor value={form.content} onChange={(content)=>onChange({...form,content})} previewMode="editor" attachments postId={form.id}/>
             <div className="article-editor-preview"><div className="article-editor-preview-label"><i/>真实前台预览 <span>未保存内容实时同步</span></div><ArticleFrontstage draft={form} categoryName={category?.name??"随笔"} categoryColor={category?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl}/></div>
           </div></div>
         </section>

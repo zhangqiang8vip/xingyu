@@ -122,7 +122,7 @@ export default function ArticleWritingStudio({draft,categoryName,categoryColor,a
   },[mode]);
   return <div className={`writing-studio mode-${mode}`} role="dialog" aria-modal="true" aria-label="沉浸式文章写作">
     <header><div className="writing-studio-brand"><i style={{background:categoryColor}}/><span>实时写作</span><b>{draft.title||"未命名文章"}</b></div><div className="writing-mode-switch" aria-label="写作方式"><button className={mode==="code"?"active":""} onClick={()=>setMode("code")}>源码</button><button className={mode==="split"?"active":""} onClick={()=>setMode("split")}>分屏</button><button className={mode==="reading"?"active":""} onClick={()=>setMode("reading")}>阅读</button></div><div className="writing-studio-actions"><span>内容实时保留在编辑表单</span><button onClick={onClose}>完成</button></div></header>
-    <main>{mode!=="reading"&&<section className="writing-source"><div><span>MARKDOWN SOURCE</span><small>输入 / 使用指令 · Ctrl+V 粘贴图片</small></div><VditorEditor value={draft.content} onChange={onChange} previewMode="editor" autoFocus/></section>}{mode!=="code"&&<ArticleFrontstage key={draft.publicId ?? draft.id ?? "new-draft"} draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>}</main>
+    <main>{mode!=="reading"&&<section className="writing-source"><div><span>MARKDOWN SOURCE</span><small>输入 / 使用指令 · Ctrl+V 粘贴图片</small></div><VditorEditor value={draft.content} onChange={onChange} previewMode="editor" autoFocus attachments postId={draft.id}/></section>}{mode!=="code"&&<ArticleFrontstage key={draft.publicId ?? draft.id ?? "new-draft"} draft={draft} categoryName={categoryName} categoryColor={categoryColor} authorName={authorName} avatarUrl={avatarUrl}/>}</main>
   </div>;
 }
 

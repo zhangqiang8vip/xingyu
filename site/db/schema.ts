@@ -63,6 +63,22 @@ export const postSlugHistory = sqliteTable("post_slug_history", {
   index("post_slug_history_post_idx").on(table.postId),
 ]);
 
+export const attachments = sqliteTable("attachments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  publicId: text("public_id").notNull(),
+  postId: integer("post_id"),
+  objectKey: text("object_key").notNull(),
+  originalName: text("original_name").notNull(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+  sha256: text("sha256").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("attachments_public_id_uidx").on(table.publicId),
+  uniqueIndex("attachments_object_key_uidx").on(table.objectKey),
+  index("attachments_post_created_idx").on(table.postId, table.createdAt, table.id),
+]);
+
 export const siteSettings = sqliteTable("site_settings", {
   id: integer("id").primaryKey(),
   brandName: text("brand_name").notNull().default("星屿"),

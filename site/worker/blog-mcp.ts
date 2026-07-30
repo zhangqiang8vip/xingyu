@@ -10,6 +10,16 @@ import { createPostRecord, getWritablePost, PostWriteError, updatePostRecord } f
 import { getContentPage, listAdminPosts } from "../db/queries";
 import { categories, contentPages } from "../db/schema";
 import { createSpace, deleteSpace, getSpaceOverview, getSpacePath, listSpaceChildren, listSpacePosts, resolveSpace, searchSpaces, updateSpace } from "../db/spaces";
+import {
+  AttachmentError,
+  MAX_MCP_ATTACHMENT_BYTES,
+  attachmentMarkdown,
+  attachmentUrl,
+  createAttachment,
+  getAttachment,
+  getAttachmentObject,
+  listPostAttachments,
+} from "../db/attachments";
 
 const MCP_PATH = "/mcp";
 const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)
@@ -158,6 +168,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
         "不要假设分类存在，必要时先调用 list_categories。update_post 不改变发布状态；发布和撤回分别使用独立工具。",
         "知识空间是私有内容边界。空间文章不会进入公开首页、归档或公开 URL；使用 list_spaces 确认路径，search_posts 可限定空间及其后代。",
         "独立页面先用 get_page 读取；update_page 会立即改变公开页面，必须先展示变更字段和摘要并获得用户确认。",
+        "附件使用 upload_attachment 上传到 R2，并把返回的 markdown 插入正文；list_attachments 和 download_attachment 可读取文章附件。",
         "调用任何写入工具前，先向用户说明文章标题、当前状态、将修改的字段与 change_summary；不要替用户默许发布或撤回。",
       ].join(" "),
     },
@@ -513,6 +524,124 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     }
   });
 
+  server.registerTool("upload_attachment", {
+    title: "上传文章附件",
+    description: "把 Base64 文件上传到博客 R2。可关联现有文章；返回可直接插入正文的标准 Markdown。调用前须说明文件名、大小、目标文章与 change_summary。",
+    inputSchema: {
+      filename: z.string().trim().min(1).max(240),
+      content_type: z.string().trim().min(1).max(160),
+      content_base64: z.string().min(1).max(12_000_000).describe("文件原始字节的标准 Base64，不含 data URL 前缀"),
+      post_identifier: IDENTIFIER_SCHEMA.optional(),
+      change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("上传文章附件"),
+    },
+    outputSchema: {
+      ok: z.boolean(),
+      attachment: z.record(z.string(), z.unknown()).optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ filename, content_type, content_base64, post_identifier, change_summary }) => {
+    try {
+      const post = post_identifier ? await hydratePost(post_identifier) : null;
+      const bytes = decodeBase64(content_base64);
+      if (bytes.byteLength > MAX_MCP_ATTACHMENT_BYTES) {
+        throw new AttachmentError("MCP 单个附件不能超过 8 MB；更大的文件请使用写作后台上传", 413);
+      }
+      const attachment = await createAttachment({
+        name: filename,
+        contentType: content_type,
+        bytes,
+        postId: post?.id ?? null,
+      });
+      return toolResult({
+        ok: true,
+        attachment: {
+          public_id: attachment.publicId,
+          filename: attachment.originalName,
+          content_type: attachment.contentType,
+          size: attachment.size,
+          sha256: attachment.sha256,
+          post_public_id: post?.publicId ?? null,
+          markdown: attachmentMarkdown(attachment),
+          url: `${origin}${attachmentUrl(attachment)}`,
+          change_summary,
+          visibility: post ? (post.status === "published" && post.spaceId === null ? "public" : "private") : "unbound_private",
+        },
+      });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
+  server.registerTool("list_attachments", {
+    title: "列出文章附件",
+    description: "读取一篇文章已绑定的全部附件及其 Markdown 链接。",
+    inputSchema: { identifier: IDENTIFIER_SCHEMA },
+    outputSchema: {
+      ok: z.boolean(),
+      attachments: z.array(z.record(z.string(), z.unknown())).optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ identifier }) => {
+    try {
+      const post = await hydratePost(identifier);
+      const rows = await listPostAttachments(post.id);
+      return toolResult({
+        ok: true,
+        attachments: rows.map((attachment) => ({
+          public_id: attachment.publicId,
+          filename: attachment.originalName,
+          content_type: attachment.contentType,
+          size: attachment.size,
+          sha256: attachment.sha256,
+          markdown: attachmentMarkdown(attachment),
+          url: `${origin}${attachmentUrl(attachment)}`,
+          created_at: attachment.createdAt,
+        })),
+      });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
+  server.registerTool("download_attachment", {
+    title: "下载文章附件",
+    description: "通过附件 public_id 读取文件。返回 Base64、校验值与文件信息，适合 Agent 保存到本地或继续处理。",
+    inputSchema: { public_id: z.string().regex(/^att_[a-f0-9]{32}$/i) },
+    outputSchema: {
+      ok: z.boolean(),
+      attachment: z.record(z.string(), z.unknown()).optional(),
+      error: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ public_id }) => {
+    try {
+      const attachment = await getAttachment(public_id.toLowerCase());
+      if (!attachment) throw new AttachmentError("附件不存在", 404);
+      if (attachment.size > MAX_MCP_ATTACHMENT_BYTES) {
+        throw new AttachmentError("附件超过 MCP 的 8 MB 下载上限，请使用返回的 URL 在已登录后台下载", 413);
+      }
+      const object = await getAttachmentObject(attachment.objectKey);
+      if (!object) throw new AttachmentError("附件文件不存在", 404);
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      return toolResult({
+        ok: true,
+        attachment: {
+          public_id: attachment.publicId,
+          filename: attachment.originalName,
+          content_type: attachment.contentType,
+          size: attachment.size,
+          sha256: attachment.sha256,
+          content_base64: encodeBase64(bytes),
+          url: `${origin}${attachmentUrl(attachment)}`,
+        },
+      });
+    } catch (error) {
+      return toolFailure(error);
+    }
+  });
+
   server.registerTool("create_draft", {
     title: "创建文章草稿",
     description: "创建一篇新的 Markdown 草稿并生成操作回执。它永远不会直接发布文章。",
@@ -837,6 +966,26 @@ function securedResponse(response: Response) {
     statusText: response.statusText,
     headers,
   });
+}
+
+function decodeBase64(value: string) {
+  try {
+    const normalized = value.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1) throw new Error();
+    const binary = atob(normalized);
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    throw new AttachmentError("content_base64 不是有效的 Base64");
+  }
+}
+
+function encodeBase64(bytes: Uint8Array) {
+  let result = "";
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    result += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(result);
 }
 
 export async function handleBlogMcpRequest(

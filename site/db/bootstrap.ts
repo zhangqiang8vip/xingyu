@@ -17,7 +17,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "7";
+  const schemaVersion = "8";
 
   try {
     const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
@@ -121,6 +121,17 @@ async function initialize() {
       client_label TEXT NOT NULL DEFAULT 'remote-mcp',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      post_id INTEGER,
+      object_key TEXT NOT NULL UNIQUE,
+      original_name TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS categories_slug_uidx ON categories(slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS spaces_parent_slug_uidx ON spaces(parent_id, slug)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS spaces_root_slug_uidx ON spaces(slug) WHERE parent_id IS NULL"),
@@ -138,6 +149,7 @@ async function initialize() {
     d1.prepare("CREATE INDEX IF NOT EXISTS post_slug_history_post_idx ON post_slug_history(post_id)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS mcp_activity_created_idx ON mcp_activity(created_at DESC, id DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS mcp_activity_post_idx ON mcp_activity(post_id, id DESC)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS attachments_post_created_idx ON attachments(post_id, created_at DESC, id DESC)"),
     d1.prepare("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"),
     d1.prepare(`CREATE TABLE IF NOT EXISTS admin_login_attempts (
       identifier TEXT PRIMARY KEY,
