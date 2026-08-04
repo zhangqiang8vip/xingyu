@@ -263,6 +263,9 @@ export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"rec
       env.DB.prepare(`${subtree} DELETE FROM post_views WHERE post_id IN (
         SELECT id FROM posts WHERE space_id IN (SELECT id FROM descendants)
       )`).bind(spaceId),
+      env.DB.prepare(`${subtree} DELETE FROM post_preview_tokens WHERE post_id IN (
+        SELECT id FROM posts WHERE space_id IN (SELECT id FROM descendants)
+      )`).bind(spaceId),
       env.DB.prepare(`${subtree} DELETE FROM posts WHERE space_id IN (SELECT id FROM descendants)`).bind(spaceId),
       env.DB.prepare(`${subtree} DELETE FROM spaces WHERE id IN (SELECT id FROM descendants)`).bind(spaceId),
     ];

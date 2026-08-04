@@ -79,6 +79,21 @@ export const attachments = sqliteTable("attachments", {
   index("attachments_post_created_idx").on(table.postId, table.createdAt, table.id),
 ]);
 
+export const postPreviewTokens = sqliteTable("post_preview_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  postId: integer("post_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  revokedAt: text("revoked_at"),
+  lastViewedAt: text("last_viewed_at"),
+  viewCount: integer("view_count").notNull().default(0),
+}, (table) => [
+  uniqueIndex("post_preview_tokens_hash_uidx").on(table.tokenHash),
+  index("post_preview_tokens_post_idx").on(table.postId, table.expiresAt, table.id),
+  index("post_preview_tokens_expiry_idx").on(table.expiresAt),
+]);
+
 export const siteSettings = sqliteTable("site_settings", {
   id: integer("id").primaryKey(),
   brandName: text("brand_name").notNull().default("星屿"),

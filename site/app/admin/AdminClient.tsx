@@ -12,6 +12,7 @@ import AdminBrowsePanel from "./AdminBrowsePanel";
 import AdminArticlesPanel from "./AdminArticlesPanel";
 import AdminSidebar from "./AdminSidebar";
 import AdminArticleEditor from "./AdminArticleEditor";
+import AdminPreviewShareDialog from "./AdminPreviewShareDialog";
 import type { AdminCategory, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
 import { readApiJson } from "../api-response";
 import ModalPostLink from "../ModalPostLink";
@@ -37,6 +38,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
   const [stats,setStats]=useState(initialStats);
   const [studio,setStudio]=useState<null|"code"|"split"|"reading">(null);
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
+  const [sharePost,setSharePost]=useState<{id:number;title:string}|null>(null);
   useSplitScrollSync(articleEditorPreviewRef,Boolean(form));
   const selectedFormCategory = form ? categories.find((item) => item.id === form.categoryId) : undefined;
 
@@ -183,11 +185,12 @@ export default function AdminClient({ categories:initialCategories, settings, co
         <AdminArticleSearch disabled={Boolean(form||studio)} articleCount={stats.total+stats.privateArticles} onBrowse={(postId)=>void browseById(postId)}/>
       </div>
 
-      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>setSection("articles")} onOpenSpaces={(spaceId)=>{setCreateSpaceOnOpen(false);setSpaceLandingId(spaceId??null);setSection("spaces")}} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={(value)=>{setQuery(value);resetCursor()}} onCategoryChange={(value)=>{setCategory(value);resetCursor()}} onStatusChange={(value)=>{setStatus(value);resetCursor()}} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId)} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId)=>void browseById(postId)} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
+      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>setSection("articles")} onOpenSpaces={(spaceId)=>{setCreateSpaceOnOpen(false);setSpaceLandingId(spaceId??null);setSection("spaces")}} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={(value)=>{setQuery(value);resetCursor()}} onCategoryChange={(value)=>{setCategory(value);resetCursor()}} onStatusChange={(value)=>{setStatus(value);resetCursor()}} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId)} onShare={setSharePost} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId)=>void browseById(postId)} onShareArticle={setSharePost} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
 
-      {form&&<AdminArticleEditor form={form} category={selectedFormCategory} categories={categories} settings={settings} message={message} previewRef={articleEditorPreviewRef} onChange={setForm} onChangeSpace={changeSpace} onClose={closeEditor} onOpenStudio={setStudio} onSave={save}/>}
+      {form&&<AdminArticleEditor form={form} category={selectedFormCategory} categories={categories} settings={settings} message={message} previewRef={articleEditorPreviewRef} onChange={setForm} onChangeSpace={changeSpace} onClose={closeEditor} onOpenStudio={setStudio} onSharePreview={form.id?()=>setSharePost({id:form.id!,title:form.title}):undefined} onSave={save}/>}
       {form&&studio&&<ArticleWritingStudio draft={form} categoryName={selectedFormCategory?.name??"随笔"} categoryColor={selectedFormCategory?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} initialMode={studio} onChange={(content)=>setForm(current=>current?{...current,content}:current)} onClose={()=>setStudio(null)}/>}
       <ModalPostLink controllerOnly readerScope="admin" publicId="" slug="" onEdit={(postId)=>void editById(postId)}/>
+      {sharePost&&<AdminPreviewShareDialog post={sharePost} onClose={()=>setSharePost(null)}/>}
     </main>
   );
 }

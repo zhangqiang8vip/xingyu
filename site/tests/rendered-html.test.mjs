@@ -230,7 +230,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "8"/);
+  assert.match(bootstrap,/schemaVersion = "9"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -340,4 +340,37 @@ test("attachments inherit article visibility and are available to editors and MC
   for (const tool of ["upload_attachment", "list_attachments", "download_attachment"]) {
     assert.ok(mcp.includes(`server.registerTool("${tool}"`), `missing MCP attachment tool ${tool}`);
   }
+});
+
+test("private article preview links are scoped, expiring and revocable", async () => {
+  const [schema, bootstrap, tokens, api, page, postView, renderer, attachmentRoute, admin, articles, spaces] = await Promise.all([
+    source("db/schema.ts"),
+    source("db/bootstrap.ts"),
+    source("db/post-preview-tokens.ts"),
+    source("app/api/posts/[id]/preview-links/route.ts"),
+    source("app/preview/[token]/page.tsx"),
+    source("app/posts/PostPageView.tsx"),
+    source("app/MarkdownRenderer.tsx"),
+    source("app/api/attachments/[publicId]/[...name]/route.ts"),
+    source("app/admin/AdminClient.tsx"),
+    source("app/admin/AdminArticlesPanel.tsx"),
+    source("app/admin/AdminSpacesPanel.tsx"),
+  ]);
+  assert.match(schema,/postPreviewTokens = sqliteTable\("post_preview_tokens"/);
+  assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS post_preview_tokens/);
+  assert.match(tokens,/crypto\.subtle\.digest\("SHA-256"/);
+  assert.match(tokens,/revoked_at IS NULL AND t\.expires_at > \?/);
+  assert.doesNotMatch(schema,/token: text\("token"\)/);
+  assert.doesNotMatch(tokens,/\(post_id, token, expires_at\)/);
+  assert.match(api,/isAdminRequest/);
+  assert.match(api,/ALLOWED_LIFETIMES/);
+  assert.match(page,/robots: \{ index: false/);
+  assert.match(page,/readerScope="preview"/);
+  assert.match(postView,/仅当前文章/);
+  assert.match(postView,/!sharedPreview&&<PostSideNavigation/);
+  assert.match(renderer,/previewAuthorizedUrl/);
+  assert.match(attachmentRoute,/previewTokenCanReadPost/);
+  assert.match(admin,/AdminPreviewShareDialog/);
+  assert.match(articles,/分享预览/);
+  assert.match(spaces,/onShareArticle/);
 });

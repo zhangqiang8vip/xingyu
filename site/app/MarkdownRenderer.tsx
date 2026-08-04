@@ -54,6 +54,12 @@ function attachmentDetails(href: string | undefined, title: string | undefined, 
   return { name, extension, metadata: title || "博客附件" };
 }
 
+function previewAuthorizedUrl(url: string | undefined, previewToken?: string) {
+  if (!url || !previewToken || !/^\/api\/attachments\/att_[a-f0-9]{32}\//i.test(url)) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}preview=${encodeURIComponent(previewToken)}`;
+}
+
 function remarkXingyuDirectives() {
   return (tree: Root) => {
     visit(tree, "containerDirective", (node) => {
@@ -83,7 +89,7 @@ const markdownSchema = {
   },
 };
 
-export default function MarkdownRenderer({ children }: { children: string }) {
+export default function MarkdownRenderer({ children, previewToken }: { children: string; previewToken?: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm, remarkMath, remarkDirective, remarkXingyuDirectives]}
     rehypePlugins={[
@@ -96,11 +102,14 @@ export default function MarkdownRenderer({ children }: { children: string }) {
       a({ href, title, children: linkChildren, ...props }) {
         const attachment = attachmentDetails(href, title, linkChildren);
         if (!attachment) return <a href={href} title={title} {...props}>{linkChildren}</a>;
-        return <a className="md-attachment-card" href={href} title={`打开 ${attachment.name}`} target="_blank" rel="noreferrer" {...props}>
+        return <a className="md-attachment-card" href={previewAuthorizedUrl(href, previewToken)} title={`打开 ${attachment.name}`} target="_blank" rel="noreferrer" {...props}>
           <span className="md-attachment-kind" aria-hidden="true">{attachment.extension.slice(0, 5)}</span>
           <span className="md-attachment-copy"><strong>{attachment.name}</strong><small>{attachment.metadata}</small></span>
           <span className="md-attachment-action">{attachment.extension === "PDF" ? "预览" : "下载"} <i>↗</i></span>
         </a>;
+      },
+      img({ src, alt, ...props }) {
+        return <img src={previewAuthorizedUrl(typeof src === "string" ? src : undefined, previewToken)} alt={alt ?? ""} {...props} />;
       },
       pre({ children: preChildren, node, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");

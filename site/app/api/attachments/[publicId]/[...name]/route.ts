@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getAttachment } from "../../../../../db/attachments";
+import { previewTokenCanReadPost } from "../../../../../db/post-preview-tokens";
 import { isAdminRequest, unauthorized } from "../../../admin-auth";
 
 export async function GET(request: Request, { params }: { params: Promise<{ publicId: string; name: string[] }> }) {
@@ -8,7 +9,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ publ
   if (!attachment) return new Response("Not found", { status: 404 });
 
   const isPublic = attachment.postStatus === "published" && attachment.postSpaceId === null;
-  if (!isPublic && !(await isAdminRequest(request))) return unauthorized();
+  const previewToken = new URL(request.url).searchParams.get("preview") ?? "";
+  const canReadPreview = Boolean(attachment.postId && previewToken && await previewTokenCanReadPost(previewToken, attachment.postId));
+  if (!isPublic && !canReadPreview && !(await isAdminRequest(request))) return unauthorized();
 
   const object = await env.MEDIA.get(attachment.objectKey);
   if (!object) return new Response("Not found", { status: 404 });

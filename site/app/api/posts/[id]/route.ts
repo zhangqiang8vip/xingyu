@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/bootstrap";
 import { getWritablePost, PostWriteError, updatePostRecord } from "../../../../db/post-write";
-import { postSlugHistory, postViews, posts } from "../../../../db/schema";
+import { postPreviewTokens, postSlugHistory, postViews, posts } from "../../../../db/schema";
 import { getSpacePath } from "../../../../db/spaces";
 import { isAdminRequest, unauthorized } from "../../admin-auth";
 import { parsePostPayload } from "../post-input";
@@ -43,6 +43,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   await ensureDatabase(); const { id } = await params;
   await getDb().delete(postSlugHistory).where(eq(postSlugHistory.postId, Number(id)));
   await getDb().delete(postViews).where(eq(postViews.postId, Number(id)));
+  await getDb().delete(postPreviewTokens).where(eq(postPreviewTokens.postId, Number(id)));
   await getDb().delete(posts).where(eq(posts.id, Number(id)));
   return Response.json({ ok: true });
 }

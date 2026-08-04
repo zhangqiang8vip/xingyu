@@ -19,6 +19,7 @@ export default function AdminArticlesPanel({
   onStatusChange,
   onNew,
   onBrowse,
+  onShare,
   onEdit,
   onRemove,
   onPrevious,
@@ -40,6 +41,7 @@ export default function AdminArticlesPanel({
   onStatusChange:(value:string)=>void;
   onNew:()=>void;
   onBrowse:(postId:number)=>void;
+  onShare:(post:{id:number;title:string})=>void;
   onEdit:(postId:number)=>void;
   onRemove:(post:AdminPost)=>void;
   onPrevious:()=>void;
@@ -61,7 +63,7 @@ export default function AdminArticlesPanel({
           <td data-label="状态"><i className={`status ${post.status}`}/>{post.status==="published"?"已发布":"草稿"}</td>
           <td data-label="浏览">{post.viewCount.toLocaleString()}</td>
           <td data-label="发布">{post.publishedAt?new Date(post.publishedAt).toLocaleDateString("zh-CN"):"—"}</td>
-          <td data-label="操作"><div className="row-actions"><button onClick={()=>onBrowse(post.id)}>浏览</button><button onClick={()=>onEdit(post.id)}>编辑</button><button className="danger" onClick={()=>onRemove(post)}>删除</button></div></td>
+          <td data-label="操作"><div className="row-actions"><button onClick={()=>onBrowse(post.id)}>浏览</button><button onClick={()=>onShare(post)}>分享预览</button><button onClick={()=>onEdit(post.id)}>编辑</button><button className="danger" onClick={()=>onRemove(post)}>删除</button></div></td>
         </tr>)}</tbody>
       </table>
     </div>

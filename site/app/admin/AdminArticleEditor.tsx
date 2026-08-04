@@ -33,6 +33,7 @@ export default function AdminArticleEditor({
   onChangeSpace,
   onClose,
   onOpenStudio,
+  onSharePreview,
   onSave,
 }:{
   form:ArticleForm;
@@ -45,6 +46,7 @@ export default function AdminArticleEditor({
   onChangeSpace:(choice:SpaceChoice|null)=>void;
   onClose:()=>void;
   onOpenStudio:(mode:"split"|"reading")=>void;
+  onSharePreview?:()=>void;
   onSave:()=>Promise<void>;
 }){
   const [slugCopied,setSlugCopied]=useState(false);
@@ -57,7 +59,7 @@ export default function AdminArticleEditor({
     <form className="editor-panel" onSubmit={submit} onKeyDown={(event)=>{if((event.metaKey||event.ctrlKey)&&event.key==="Enter")event.currentTarget.requestSubmit()}}>
       <header className="editor-header">
         <div><small>{form.id?`EDITING · ARTICLE ${form.id}`:"COMPOSE · NEW ARTICLE"}</small><h2>{form.id?"编辑文章":"写一篇新文章"}</h2><p>编辑内容、检查链接，然后发布到{settings.brandName}。</p></div>
-        <div className="editor-header-actions"><button className="editor-preview-button" type="button" onClick={()=>onOpenStudio("reading")}>即时预览 <b>↗</b></button><span className={`editor-state ${form.status}`}>{form.status==="published"?(form.spaceId?"内容完成":"已发布"):"草稿"}</span><button type="button" aria-label="关闭编辑器" onClick={onClose}>×</button></div>
+        <div className="editor-header-actions"><button className="editor-preview-button" type="button" onClick={()=>onOpenStudio("reading")}>即时预览 <b>↗</b></button>{form.id&&onSharePreview&&<button className="editor-share-button" type="button" onClick={onSharePreview}>邀请预览 <b>◇</b></button>}<span className={`editor-state ${form.status}`}>{form.status==="published"?(form.spaceId?"内容完成":"已发布"):"草稿"}</span><button type="button" aria-label="关闭编辑器" onClick={onClose}>×</button></div>
       </header>
 
       <div className="editor-form-body">
