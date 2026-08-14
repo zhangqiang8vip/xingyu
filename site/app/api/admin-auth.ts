@@ -2,18 +2,23 @@ import { cookies } from "next/headers";
 import { env } from "cloudflare:workers";
 import { pbkdf2Sync, scryptSync } from "node:crypto";
 import { ensureDatabase } from "../../db/bootstrap";
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_SECONDS,
+  adminRuntimeEnv,
+  base64UrlToBytes,
+  bytesToBase64Url,
+  constantTimeBytesEqual,
+  isDevelopment,
+  isValidAdminSessionToken,
+  sha256Bytes,
+  signAdminPayload,
+  validSessionSecret,
+} from "../../db/admin-session";
 
-const SESSION_COOKIE = "xingyu_admin_session";
-const SESSION_SECONDS = 8 * 60 * 60;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const LOGIN_BLOCK_SECONDS = 30 * 60;
 const MAX_LOGIN_ATTEMPTS = 5;
-type AdminRuntimeEnv = Env & {
-  ADMIN_PASSWORD_HASH?: string;
-  ADMIN_PASSWORD?: string;
-  ADMIN_SESSION_SECRET?: string;
-  APP_ENV?: string;
-};
 
 export type AdminIdentity = { displayName: string; email: string };
 
@@ -43,50 +48,31 @@ export async function verifyLocalAdminPassword(password: string) {
   const encoded = runtime.ADMIN_PASSWORD_HASH;
   if (encoded) return verifyPbkdf2Password(password, encoded);
   if (!isDevelopment() || !runtime.ADMIN_PASSWORD) return false;
-  return constantTimeBytesEqual(await sha256(password), await sha256(runtime.ADMIN_PASSWORD));
+  return constantTimeBytesEqual(await sha256Bytes(password), await sha256Bytes(runtime.ADMIN_PASSWORD));
 }
 
 export async function createLocalAdminSession() {
-  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  const expiresAt = Math.floor(Date.now() / 1000) + ADMIN_SESSION_SECONDS;
   const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(18)));
   const payload = `v1.${expiresAt}.${nonce}`;
-  const signature = await sign(payload);
+  const signature = await signAdminPayload(payload);
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, `${payload}.${signature}`, {
+  cookieStore.set(ADMIN_SESSION_COOKIE, `${payload}.${signature}`, {
     httpOnly: true,
-    sameSite: "strict",
+    sameSite: "lax",
     secure: !isDevelopment(),
     path: "/",
-    maxAge: SESSION_SECONDS,
+    maxAge: ADMIN_SESSION_SECONDS,
   });
 }
 
 export async function clearLocalAdminSession() {
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "strict", secure: !isDevelopment(), path: "/", maxAge: 0 });
+  cookieStore.set(ADMIN_SESSION_COOKIE, "", { httpOnly: true, sameSite: "lax", secure: !isDevelopment(), path: "/", maxAge: 0 });
 }
 
 async function hasValidAdminSession() {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return false;
-  const parts = token.split(".");
-  if (parts.length !== 4 || parts[0] !== "v1" || !/^\d+$/.test(parts[1])) return false;
-  if (Number(parts[1]) <= Math.floor(Date.now() / 1000)) return false;
-  const payload = parts.slice(0, 3).join(".");
-  const signature = parts[3];
-  return constantTimeTextEqual(signature, await sign(payload));
-}
-
-async function sign(payload: string) {
-  const secret = adminRuntimeEnv().ADMIN_SESSION_SECRET;
-  if (!secret) return "";
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)));
-  return bytesToBase64Url(bytes);
-}
-
-async function sha256(value: string) {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return isValidAdminSessionToken((await cookies()).get(ADMIN_SESSION_COOKIE)?.value);
 }
 
 async function verifyPbkdf2Password(password: string, encoded: string) {
@@ -156,46 +142,7 @@ export async function clearAdminLoginFailures(identifier: string) {
 async function loginIdentifier(request: Request) {
   const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const secret = validSessionSecret() ?? "";
-  return bytesToBase64Url(await sha256(`${secret}:${ip}`));
-}
-
-function validSessionSecret() {
-  const secret = adminRuntimeEnv().ADMIN_SESSION_SECRET;
-  return secret && secret.length >= 32 ? secret : "";
-}
-
-function adminRuntimeEnv() {
-  return env as AdminRuntimeEnv;
-}
-
-function isDevelopment() {
-  return adminRuntimeEnv().APP_ENV !== "production";
-}
-
-function constantTimeTextEqual(left: string, right: string) {
-  const maxLength = Math.max(left.length, right.length);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < maxLength; index += 1) difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
-  return difference === 0;
-}
-
-function constantTimeBytesEqual(left: Uint8Array, right: Uint8Array) {
-  const maxLength = Math.max(left.length, right.length);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < maxLength; index += 1) difference |= (left[index] || 0) ^ (right[index] || 0);
-  return difference === 0;
-}
-
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return bytesToBase64Url(await sha256Bytes(`${secret}:${ip}`));
 }
 
 export function unauthorized() {

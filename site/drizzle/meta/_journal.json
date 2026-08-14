@@ -57,6 +57,13 @@
       "when": 1785816035099,
       "tag": "0007_breezy_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786703815043,
+      "tag": "0008_purple_metal_master",
+      "breakpoints": true
     }
   ]
 }

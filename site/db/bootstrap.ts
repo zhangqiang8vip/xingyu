@@ -17,7 +17,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "9";
+  const schemaVersion = "10";
 
   try {
     const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
@@ -171,6 +171,80 @@ async function initialize() {
       blocked_until INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id TEXT NOT NULL UNIQUE,
+      client_name TEXT NOT NULL,
+      client_type TEXT NOT NULL DEFAULT 'public',
+      client_secret_hash TEXT,
+      redirect_uris TEXT NOT NULL DEFAULT '[]',
+      allowed_scopes TEXT NOT NULL,
+      token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_hash TEXT NOT NULL UNIQUE,
+      client_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      code_challenge TEXT NOT NULL,
+      code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      client_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      revoked_at INTEGER,
+      last_used_at INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      family_id TEXT NOT NULL,
+      parent_token_id INTEGER,
+      client_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      absolute_expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      revoked_at INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_consents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      granted_scopes TEXT NOT NULL,
+      granted_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS oauth_rate_limits (
+      identifier TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`),
+    d1.prepare("CREATE INDEX IF NOT EXISTS oauth_authorization_codes_expiry_idx ON oauth_authorization_codes(expires_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS oauth_access_tokens_client_idx ON oauth_access_tokens(client_id, subject, expires_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS oauth_refresh_tokens_family_idx ON oauth_refresh_tokens(family_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS oauth_refresh_tokens_client_idx ON oauth_refresh_tokens(client_id, subject)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS oauth_consents_subject_client_resource_uidx ON oauth_consents(subject, client_id, resource)"),
     d1.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(title, excerpt, content, content='posts', content_rowid='id', tokenize='trigram')"),
     d1.prepare(`CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
       INSERT INTO posts_fts(rowid, title, excerpt, content) VALUES (new.id, new.title, new.excerpt, new.content);
@@ -237,6 +311,9 @@ async function initialize() {
       .bind(p.slug, p.eyebrow, p.title, p.excerpt, p.content),
     d1.prepare("INSERT OR IGNORE INTO content_pages (slug, eyebrow, title, excerpt, content) VALUES (?, ?, ?, ?, ?)")
       .bind(connect.slug, connect.eyebrow, connect.title, connect.excerpt, connect.content),
+    d1.prepare(`INSERT OR IGNORE INTO oauth_clients
+      (client_id, client_name, client_type, client_secret_hash, redirect_uris, allowed_scopes, token_endpoint_auth_method, enabled)
+      VALUES ('grok-xingyu', 'Grok · XINGYU', 'public', NULL, '[]', 'xingyu.read xingyu.draft xingyu.publish offline_access', 'none', 1)`),
   ]);
 
   const searchVersion = await d1.prepare("SELECT value FROM app_meta WHERE key = 'posts_fts_version'").first<{ value: string }>();

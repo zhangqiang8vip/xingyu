@@ -20,6 +20,7 @@ import {
   getAttachmentObject,
   listPostAttachments,
 } from "../db/attachments";
+import { authenticateMcp, rememberTokenUse, requireScope, scopeFailure, type McpAuth } from "./mcp-auth";
 
 const MCP_PATH = "/mcp";
 const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)
@@ -49,8 +50,10 @@ function toolResult(payload: ToolPayload, isError = false) {
 }
 
 function toolFailure(error: unknown) {
-  const message = error instanceof Error ? error.message : "操作失败";
-  return toolResult({ ok: false, error: message }, true);
+  return scopeFailure(error) ?? toolResult({
+    ok: false,
+    error: error instanceof Error ? error.message : "操作失败",
+  }, true);
 }
 
 function publicPostUrl(origin: string, post: { publicId: string; slug: string }) {
@@ -158,7 +161,7 @@ async function hydratePost(identifier: string) {
   return post;
 }
 
-function createBlogMcpServer(origin: string, clientLabel: string) {
+function createBlogMcpServer(origin: string, clientLabel: string, auth: McpAuth) {
   const server = new McpServer(
     { name: "xingyu-blog-writer", version: "1.0.0" },
     {
@@ -184,6 +187,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
     try {
+      requireScope(auth, "xingyu.read");
       await ensureDatabase();
       const rows = await getDb().select({
         id: categories.id, name: categories.name, slug: categories.slug, color: categories.color,
@@ -202,6 +206,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
   },async({parent,query})=>{
     try{
+      requireScope(auth, "xingyu.read");
       if(query){
         const matches=await searchSpaces(query);
         return toolResult({ok:true,parent:null,spaces:matches.map((space)=>({...space,display_path:space.path.map((item)=>item.name).join(" / ")}))});
@@ -220,6 +225,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
   },async({space})=>{
     try{
+      requireScope(auth, "xingyu.read");
       const resolved=await resolveSpace(space);
       const overview=await getSpaceOverview(resolved.id);
       return toolResult({ok:true,space:overview?{...overview,display_path:overview.path.map((item)=>item.name).join(" / ")}:null});
@@ -234,6 +240,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
   },async({name,parent,change_summary})=>{
     try{
+      requireScope(auth, "xingyu.draft");
       const parentSpace=parent?await resolveSpace(parent):null;
       const created=await createSpace({name,parentId:parentSpace?.id??null});
       const path=await getSpacePath(created.id);
@@ -253,6 +260,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
   },async({space,name,parent,change_summary})=>{
     try{
+      requireScope(auth, "xingyu.publish");
       const current=await resolveSpace(space);
       const parentSpace=typeof parent==="string"?await resolveSpace(parent):parent===null?null:undefined;
       const updated=await updateSpace(current.id,{name,parentId:parentSpace===undefined?undefined:parentSpace?.id??null});
@@ -278,6 +286,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
   },async({space,parent,change_summary})=>{
     try{
+      requireScope(auth, "xingyu.publish");
       const current=await resolveSpace(space);
       const parentSpace=parent===null?null:await resolveSpace(parent);
       const updated=await updateSpace(current.id,{parentId:parentSpace?.id??null});
@@ -305,6 +314,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false},
   },async({space,mode,move_to,confirm_name,change_summary})=>{
     try{
+      requireScope(auth, "xingyu.publish");
       const current=await resolveSpace(space);
       const moveTarget=mode==="move"&&move_to?await resolveSpace(move_to):null;
       if(mode==="move"&&!moveTarget)throw new Error("移动内容后删除必须提供 move_to 目标知识空间");
@@ -344,6 +354,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ query, status, category, space, include_descendants, cursor, page_size }) => {
     try {
+      requireScope(auth, "xingyu.read");
       const resolvedSpace=space?await resolveSpace(space):null;
       const result = resolvedSpace
         ? await listSpacePosts({spaceId:resolvedSpace.id,includeDescendants:include_descendants,query,status,category,cursor,limit:page_size})
@@ -376,6 +387,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ identifier }) => {
     try {
+      requireScope(auth, "xingyu.read");
       const post = await hydratePost(identifier);
       const category = await getDb().select({
         name: categories.name, slug: categories.slug, color: categories.color,
@@ -415,6 +427,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ slug }) => {
     try {
+      requireScope(auth, "xingyu.read");
       const page = await getContentPage(slug);
       if (!page) throw new PostWriteError("页面不存在", 404);
       return toolResult({
@@ -454,6 +467,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, async ({ slug, eyebrow, title, excerpt, content_markdown, change_summary }) => {
     try {
+      requireScope(auth, "xingyu.publish");
       const current = await getContentPage(slug);
       if (!current) throw new PostWriteError("页面不存在", 404);
       const next = {
@@ -518,6 +532,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ limit }) => {
     try {
+      requireScope(auth, "xingyu.read");
       return toolResult({ ok: true, activities: await listMcpActivity(limit) });
     } catch (error) {
       return toolFailure(error);
@@ -543,6 +558,8 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
   }, async ({ filename, content_type, content_base64, post_identifier, change_summary }) => {
     try {
       const post = post_identifier ? await hydratePost(post_identifier) : null;
+      if (post && post.status === "published" && !post.spaceId) requireScope(auth, "xingyu.publish");
+      else requireScope(auth, "xingyu.draft");
       const bytes = decodeBase64(content_base64);
       if (bytes.byteLength > MAX_MCP_ATTACHMENT_BYTES) {
         throw new AttachmentError("MCP 单个附件不能超过 8 MB；更大的文件请使用写作后台上传", 413);
@@ -585,6 +602,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ identifier }) => {
     try {
+      requireScope(auth, "xingyu.read");
       const post = await hydratePost(identifier);
       const rows = await listPostAttachments(post.id);
       return toolResult({
@@ -617,6 +635,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ public_id }) => {
     try {
+      requireScope(auth, "xingyu.read");
       const attachment = await getAttachment(public_id.toLowerCase());
       if (!attachment) throw new AttachmentError("附件不存在", 404);
       if (attachment.size > MAX_MCP_ATTACHMENT_BYTES) {
@@ -664,6 +683,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {
+      requireScope(auth, "xingyu.draft");
       const resolvedCategory = await resolveCategory(category);
       const resolvedSpace=space?await resolveSpace(space):null;
       const post = await createPostRecord({
@@ -729,6 +749,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
   }, async ({ identifier, title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
+      requireScope(auth, current.status === "published" ? "xingyu.publish" : "xingyu.draft");
       const resolvedCategory = category ? await resolveCategory(category) : null;
       const resolvedSpace=typeof space==="string"?await resolveSpace(space):space===null?null:undefined;
       const nextSpaceId=resolvedSpace===undefined?current.spaceId:resolvedSpace?.id??null;
@@ -809,6 +830,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, async ({ identifier, published_at, change_summary }) => {
     try {
+      requireScope(auth, "xingyu.publish");
       const current = await hydratePost(identifier);
       if (current.status === "published") {
         return toolResult({
@@ -883,6 +905,7 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, async ({ identifier, change_summary }) => {
     try {
+      requireScope(auth, "xingyu.publish");
       const current = await hydratePost(identifier);
       if (current.status === "draft") {
         return toolResult({
@@ -940,22 +963,6 @@ function createBlogMcpServer(origin: string, clientLabel: string) {
   return server;
 }
 
-async function digestSecret(value: string) {
-  return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-}
-
-async function isAuthorized(request: Request, expectedToken?: string) {
-  if (!expectedToken) return false;
-  const header = request.headers.get("Authorization") ?? "";
-  const match = /^Bearer\s+(.+)$/i.exec(header);
-  if (!match) return false;
-  const [provided, expected] = await Promise.all([
-    digestSecret(match[1]),
-    digestSecret(expectedToken),
-  ]);
-  return crypto.subtle.timingSafeEqual(provided, expected);
-}
-
 function securedResponse(response: Response) {
   const headers = new Headers(response.headers);
   headers.set("Cache-Control", "no-store");
@@ -993,28 +1000,16 @@ export async function handleBlogMcpRequest(
   env: Env,
   ctx: ExecutionContext,
 ) {
-  if (!env.MCP_WRITE_TOKEN) {
-    return Response.json(
-      { error: "MCP 写作服务尚未配置" },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  if (!(await isAuthorized(request, env.MCP_WRITE_TOKEN))) {
-    return Response.json(
-      { error: "MCP 写作令牌无效" },
-      {
-        status: 401,
-        headers: {
-          "WWW-Authenticate": 'Bearer realm="Xingyu Blog MCP"',
-          "Cache-Control": "no-store",
-        },
-      },
-    );
-  }
+  await ensureDatabase();
+  const auth = await authenticateMcp(request);
+  if (auth instanceof Response) return auth;
+  await rememberTokenUse(auth, ctx);
 
   const origin = new URL(request.url).origin;
-  const clientLabel = (request.headers.get("User-Agent") || "remote-mcp").slice(0, 160);
-  const server = createBlogMcpServer(origin, clientLabel);
+  const clientLabel = auth.authType === "legacy"
+    ? (request.headers.get("User-Agent") || "remote-mcp").slice(0, 160)
+    : `oauth:${auth.clientId}`;
+  const server = createBlogMcpServer(origin, clientLabel, auth);
   const response = await createMcpHandler(server, {
     route: MCP_PATH,
     enableJsonResponse: true,

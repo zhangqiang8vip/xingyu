@@ -150,3 +150,90 @@ export const mcpActivity = sqliteTable("mcp_activity", {
   index("mcp_activity_created_idx").on(table.createdAt, table.id),
   index("mcp_activity_post_idx").on(table.postId, table.id),
 ]);
+
+export const oauthClients = sqliteTable("oauth_clients", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  clientId: text("client_id").notNull(),
+  clientName: text("client_name").notNull(),
+  clientType: text("client_type", { enum: ["public", "confidential"] }).notNull().default("public"),
+  clientSecretHash: text("client_secret_hash"),
+  redirectUris: text("redirect_uris").notNull().default("[]"),
+  allowedScopes: text("allowed_scopes").notNull(),
+  tokenEndpointAuthMethod: text("token_endpoint_auth_method").notNull().default("none"),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("oauth_clients_client_id_uidx").on(table.clientId)]);
+
+export const oauthAuthorizationCodes = sqliteTable("oauth_authorization_codes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  codeHash: text("code_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  subject: text("subject").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  codeChallengeMethod: text("code_challenge_method").notNull().default("S256"),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("oauth_authorization_codes_hash_uidx").on(table.codeHash),
+  index("oauth_authorization_codes_expiry_idx").on(table.expiresAt),
+]);
+
+export const oauthAccessTokens = sqliteTable("oauth_access_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tokenHash: text("token_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  subject: text("subject").notNull(),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  revokedAt: integer("revoked_at"),
+  lastUsedAt: integer("last_used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("oauth_access_tokens_hash_uidx").on(table.tokenHash),
+  index("oauth_access_tokens_client_idx").on(table.clientId, table.subject, table.expiresAt),
+]);
+
+export const oauthRefreshTokens = sqliteTable("oauth_refresh_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tokenHash: text("token_hash").notNull(),
+  familyId: text("family_id").notNull(),
+  parentTokenId: integer("parent_token_id"),
+  clientId: text("client_id").notNull(),
+  subject: text("subject").notNull(),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  absoluteExpiresAt: integer("absolute_expires_at").notNull(),
+  usedAt: integer("used_at"),
+  revokedAt: integer("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("oauth_refresh_tokens_hash_uidx").on(table.tokenHash),
+  index("oauth_refresh_tokens_family_idx").on(table.familyId),
+  index("oauth_refresh_tokens_client_idx").on(table.clientId, table.subject),
+]);
+
+export const oauthConsents = sqliteTable("oauth_consents", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  subject: text("subject").notNull(),
+  clientId: text("client_id").notNull(),
+  resource: text("resource").notNull(),
+  grantedScopes: text("granted_scopes").notNull(),
+  grantedAt: integer("granted_at").notNull(),
+  revokedAt: integer("revoked_at"),
+}, (table) => [
+  uniqueIndex("oauth_consents_subject_client_resource_uidx").on(table.subject, table.clientId, table.resource),
+]);
+
+export const oauthRateLimits = sqliteTable("oauth_rate_limits", {
+  identifier: text("identifier").primaryKey(),
+  attempts: integer("attempts").notNull().default(0),
+  windowStarted: integer("window_started").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

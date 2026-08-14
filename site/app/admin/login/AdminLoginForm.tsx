@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { readApiJson } from "../../api-response";
 
-export default function AdminLoginForm() {
+export default function AdminLoginForm({ returnTo = "" }: { returnTo?: string }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -14,7 +14,7 @@ export default function AdminLoginForm() {
     const response = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     const data = await readApiJson<Record<string, never>>(response);
     if (!response.ok) { setError(data.error ?? "登录失败"); setLoading(false); return; }
-    window.location.replace("/admin");
+    window.location.replace(returnTo || "/admin");
   }
 
   return <form className="admin-login-form" onSubmit={submit}>

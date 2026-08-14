@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleBlogMcpRequest, isBlogMcpPath } from "./blog-mcp";
+import { handleOAuthRequest, isOAuthPath } from "./oauth";
 
 const PUBLIC_DOCUMENT_TTL_SECONDS = 120;
 const edgeCache = (caches as CacheStorage & { default: Cache }).default;
@@ -11,7 +12,7 @@ function isPublicDocumentRequest(request: Request, url: URL): boolean {
   if (!request.headers.get("Accept")?.includes("text/html")) return false;
   if (request.headers.has("Range") || request.headers.has("RSC")) return false;
   if (request.headers.has("Next-Router-State-Tree") || url.searchParams.has("_rsc")) return false;
-  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api")) return false;
+  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api") || url.pathname.startsWith("/oauth") || url.pathname.startsWith("/.well-known")) return false;
   if (url.searchParams.has("adminPreview")) return false;
   return true;
 }
@@ -61,6 +62,10 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
+    }
+
+    if (isOAuthPath(url.pathname)) {
+      return handleOAuthRequest(request);
     }
 
     if (isBlogMcpPath(url.pathname)) {

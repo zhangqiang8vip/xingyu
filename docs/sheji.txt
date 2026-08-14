@@ -1,0 +1,2170 @@
+# XINGYU MCP 多客户端 OAuth 2.1 接入设计稿
+
+**版本：** v1.0
+**目标域名：** `zhangwansen.click`
+**MCP Endpoint：** `https://zhangwansen.click/mcp`
+**状态：** 待开发
+**适用客户端：** ChatGPT、Grok、未来其他标准 MCP Client
+
+---
+
+## 1. 项目目标
+
+XINGYU 当前已经存在一条可工作的 MCP 写作通道：
+
+```text
+ChatGPT
+   │
+   │ Authorization: Bearer XINGYU_BLOG_MCP_TOKEN
+   ▼
+https://zhangwansen.click/mcp
+   ▼
+XINGYU
+```
+
+本次改造**不替换、不删除现有鉴权**。
+
+在现有系统旁边增加标准 OAuth 2.1 Authorization Server，使 Grok 可以通过 OAuth + PKCE 接入：
+
+```text
+                         ┌─────────────────────┐
+                         │   ChatGPT（现有）    │
+                         │ Static Bearer Token │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │                     │
+                         │      /mcp           │
+                         │                     │
+                         └──────────▲──────────┘
+                                    │
+                                    │ OAuth Access Token
+                                    │
+                         ┌──────────┴──────────┐
+                         │       Grok          │
+                         └──────────▲──────────┘
+                                    │
+                              OAuth 2.1 + PKCE
+                                    │
+                   ┌────────────────┴────────────────┐
+                   │                                 │
+         /oauth/authorize                   /oauth/token
+                   │                                 │
+                   └──────────────┬──────────────────┘
+                                  ▼
+                         XINGYU OAuth Server
+```
+
+最终效果：
+
+```text
+旧 ChatGPT       ✅ 不改配置继续使用
+Grok             ✅ OAuth 接入
+未来 ChatGPT     ✅ 可选迁移到 OAuth
+其他 MCP Client ✅ 可继续扩展
+```
+
+MCP 当前 HTTP 授权规范要求 OAuth 授权服务遵循 OAuth 2.1，MCP Server 提供 Protected Resource Metadata，并通过 Authorization Server Metadata 暴露授权能力；授权请求还需要面向具体 MCP Resource，访问 MCP 时使用 Bearer Access Token。
+
+---
+
+# 2. 设计原则
+
+### 2.1 向后兼容
+
+现有：
+
+```text
+XINGYU_BLOG_MCP_TOKEN
+```
+
+继续有效。
+
+OAuth 上线当天，不要求修改 ChatGPT。
+
+### 2.2 双鉴权
+
+`/mcp` 同时接受：
+
+```text
+Legacy Token
++
+OAuth Access Token
+```
+
+### 2.3 Public OAuth Client
+
+Grok 使用：
+
+```text
+Authorization Code
++
+PKCE S256
++
+无 Client Secret
+```
+
+Client Secret 不等于现有 `XINGYU_BLOG_MCP_TOKEN`，两者完全独立。
+
+MCP OAuth 对授权码流程要求 PKCE，并要求客户端确认服务端支持 PKCE；当前规范要求能够使用时采用 `S256`。
+
+### 2.4 最小权限
+
+OAuth 权限分为：
+
+```text
+xingyu.read
+xingyu.draft
+xingyu.publish
+offline_access
+```
+
+默认不给 AI 客户端公开发布权限。
+
+### 2.5 OAuth 授权 ≠ 发布确认
+
+即使 Grok 获得：
+
+```text
+xingyu.publish
+```
+
+XINGYU 当前已有的：
+
+```text
+publish_post 必须明确确认
+unpublish_post 必须明确确认
+update_page 必须确认
+修改已发布文章必须确认
+```
+
+仍然保留。
+
+OAuth Scope 是“能不能做”。
+
+XINGYU 的确认机制是“这一次是否允许做”。
+
+两层不能合并。
+
+---
+
+# 3. 最终 Endpoint 设计
+
+## 3.1 现有 Endpoint
+
+```text
+POST /mcp
+```
+
+完整地址：
+
+```text
+https://zhangwansen.click/mcp
+```
+
+职责：
+
+```text
+MCP Streamable HTTP Endpoint
++
+OAuth Protected Resource
+```
+
+---
+
+## 3.2 新增 Endpoint
+
+```text
+GET  /.well-known/oauth-protected-resource/mcp
+
+GET  /.well-known/oauth-authorization-server
+
+GET  /oauth/authorize
+
+POST /oauth/authorize
+
+POST /oauth/token
+
+POST /oauth/revoke
+```
+
+以后可选增加：
+
+```text
+POST /oauth/register
+```
+
+用于 Dynamic Client Registration。
+
+当前 MCP 规范要求 Protected Resource Metadata；Authorization Server 则至少要提供标准 OAuth Authorization Server Metadata 或 OIDC Discovery。动态客户端注册属于可选能力，不必作为第一阶段上线条件。
+
+---
+
+# 4. Protected Resource Metadata
+
+Endpoint：
+
+```text
+GET /.well-known/oauth-protected-resource/mcp
+```
+
+返回：
+
+```json
+{
+  "resource": "https://zhangwansen.click/mcp",
+  "authorization_servers": [
+    "https://zhangwansen.click"
+  ],
+  "scopes_supported": [
+    "xingyu.read",
+    "xingyu.draft",
+    "xingyu.publish",
+    "offline_access"
+  ]
+}
+```
+
+其中最重要的是：
+
+```text
+resource
+=
+https://zhangwansen.click/mcp
+```
+
+所有给 XINGYU MCP 使用的 OAuth Token 都必须绑定到这个 Resource。
+
+不得接受给其他 API 签发的 Access Token。
+
+---
+
+# 5. Authorization Server Metadata
+
+Endpoint：
+
+```text
+GET /.well-known/oauth-authorization-server
+```
+
+推荐返回：
+
+```json
+{
+  "issuer": "https://zhangwansen.click",
+
+  "authorization_endpoint":
+    "https://zhangwansen.click/oauth/authorize",
+
+  "token_endpoint":
+    "https://zhangwansen.click/oauth/token",
+
+  "revocation_endpoint":
+    "https://zhangwansen.click/oauth/revoke",
+
+  "response_types_supported": [
+    "code"
+  ],
+
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token"
+  ],
+
+  "code_challenge_methods_supported": [
+    "S256"
+  ],
+
+  "token_endpoint_auth_methods_supported": [
+    "none"
+  ],
+
+  "scopes_supported": [
+    "xingyu.read",
+    "xingyu.draft",
+    "xingyu.publish",
+    "offline_access"
+  ]
+}
+```
+
+这里：
+
+```text
+token_endpoint_auth_methods_supported = none
+```
+
+意味着当前 Grok 客户端按 Public Client 处理：
+
+```text
+Client ID      有
+Client Secret  无
+PKCE           有
+```
+
+---
+
+# 6. OAuth Client 设计
+
+第一阶段只正式注册一个 OAuth Client。
+
+## Grok Client
+
+```text
+client_id:
+grok-xingyu
+
+client_name:
+Grok · XINGYU
+
+client_type:
+public
+
+client_secret:
+NULL
+
+token_endpoint_auth_method:
+none
+
+pkce:
+S256
+
+resource:
+https://zhangwansen.click/mcp
+```
+
+初始权限：
+
+```text
+xingyu.read
+xingyu.draft
+offline_access
+```
+
+**第一轮不建议直接给：**
+
+```text
+xingyu.publish
+```
+
+等读取、草稿创建、草稿修改全部跑通后再开放。
+
+---
+
+# 7. Grok Redirect URI
+
+这是整个配置中**唯一不能由 XINGYU 自己猜出来的核心参数**。
+
+来源：
+
+```text
+Grok
+```
+
+第一次调试时：
+
+```text
+Grok
+  ↓
+GET /oauth/authorize
+```
+
+XINGYU 暂时记录：
+
+```text
+client_id
+redirect_uri
+scope
+state
+resource
+code_challenge
+code_challenge_method
+```
+
+然后从日志中取得真实：
+
+```text
+redirect_uri
+```
+
+确认它确实属于 Grok/xAI 后，再保存进：
+
+```text
+oauth_clients.redirect_uris
+```
+
+必须：
+
+```text
+完全匹配
+```
+
+例如数据库实际保存某个：
+
+```text
+https://<Grok实际提供的地址>/callback
+```
+
+以后收到：
+
+```text
+https://<其他地址>/callback
+```
+
+直接拒绝。
+
+不允许：
+
+```text
+*
+https://grok.com/*
+*.grok.com
+```
+
+OAuth/MCP 授权规范要求严格验证 redirect URI，以避免开放重定向攻击。
+
+---
+
+# 8. OAuth Scope 设计
+
+## 8.1 `xingyu.read`
+
+允许：
+
+```text
+list_categories
+search_posts
+get_post
+get_page
+list_mcp_activity
+```
+
+不可修改任何博客数据。
+
+---
+
+## 8.2 `xingyu.draft`
+
+包含：
+
+```text
+create_draft
+```
+
+以及：
+
+```text
+update_post
+```
+
+但只有当目标文章：
+
+```text
+status = draft
+```
+
+时允许。
+
+---
+
+## 8.3 `xingyu.publish`
+
+这是高权限 Scope。
+
+允许：
+
+```text
+publish_post
+unpublish_post
+update_page
+```
+
+以及：
+
+```text
+update_post
+```
+
+当目标：
+
+```text
+status = published
+```
+
+时必须拥有该 Scope。
+
+因此 `update_post` 的权限不是固定的：
+
+```text
+update_post
+   │
+   ├─ 当前文章 = draft
+   │      ↓
+   │  xingyu.draft
+   │
+   └─ 当前文章 = published
+          ↓
+      xingyu.publish
+```
+
+这样可以避免 Grok 只拿到“草稿写入权限”，却通过 `update_post` 修改线上文章。
+
+---
+
+# 9. Scope 与 Tool 完整映射
+
+| MCP Tool            | Required Scope   | 公开影响  |
+| ------------------- | ---------------- | ----- |
+| `list_categories`   | `xingyu.read`    | 无     |
+| `search_posts`      | `xingyu.read`    | 无     |
+| `get_post`          | `xingyu.read`    | 无     |
+| `get_page`          | `xingyu.read`    | 无     |
+| `list_mcp_activity` | `xingyu.read`    | 无     |
+| `create_draft`      | `xingyu.draft`   | 无     |
+| `update_post` 草稿    | `xingyu.draft`   | 无     |
+| `update_post` 已发布   | `xingyu.publish` | **有** |
+| `publish_post`      | `xingyu.publish` | **有** |
+| `unpublish_post`    | `xingyu.publish` | **有** |
+| `update_page`       | `xingyu.publish` | **有** |
+
+---
+
+# 10. `/mcp` 双鉴权设计
+
+所有 MCP Request：
+
+```text
+Authorization: Bearer <TOKEN>
+```
+
+进入统一 Auth Gateway。
+
+逻辑：
+
+```text
+                 Bearer Token
+                      │
+                      ▼
+             ┌─────────────────┐
+             │ Token 有效吗？   │
+             └────────┬────────┘
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+
+ XINGYU_BLOG_MCP_TOKEN       xy_at_xxxxxxx
+          │                       │
+          ▼                       ▼
+    Legacy Auth              OAuth Token DB
+          │                       │
+          ▼                       ▼
+    FULL LEGACY              检查过期时间
+    PERMISSION               检查 resource
+                             检查 client
+                             检查 scopes
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+                  MCP Router
+```
+
+伪代码：
+
+```ts
+async function authenticateMcp(req) {
+  const bearer = getBearerToken(req)
+
+  if (!bearer) {
+    throw oauthUnauthorized()
+  }
+
+  // 兼容当前 ChatGPT
+  if (safeEqual(bearer, process.env.XINGYU_BLOG_MCP_TOKEN)) {
+    return {
+      authType: "legacy",
+      clientId: "legacy-chatgpt",
+      scopes: [
+        "xingyu.read",
+        "xingyu.draft",
+        "xingyu.publish"
+      ]
+    }
+  }
+
+  // OAuth Access Token
+  if (bearer.startsWith("xy_at_")) {
+    return authenticateOAuthAccessToken(bearer)
+  }
+
+  throw oauthUnauthorized()
+}
+```
+
+Legacy Token 比较必须使用恒定时间比较，避免普通字符串比较带来的时序泄漏。
+
+同时禁止把完整 Token 写进日志。
+
+---
+
+# 11. 未授权 `/mcp` Response
+
+没有 Authorization：
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://zhangwansen.click/.well-known/oauth-protected-resource/mcp", scope="xingyu.read"
+```
+
+Body 可以保持简洁：
+
+```json
+{
+  "error": "unauthorized"
+}
+```
+
+MCP 当前规范要求无效或过期 Access Token 返回 `401`；Scope 不足使用 `403`，Protected Resource 可以通过 `WWW-Authenticate` 指向 Resource Metadata。
+
+---
+
+# 12. `/oauth/authorize` 授权流程
+
+Grok 发起：
+
+```text
+GET /oauth/authorize
+
+response_type=code
+client_id=grok-xingyu
+redirect_uri=<grok callback>
+scope=xingyu.read xingyu.draft offline_access
+state=<random>
+resource=https://zhangwansen.click/mcp
+code_challenge=<PKCE challenge>
+code_challenge_method=S256
+```
+
+服务端依次校验：
+
+```text
+response_type == code
+
+client_id 是否存在
+
+client 是否 enabled
+
+redirect_uri 是否完全匹配
+
+resource ==
+https://zhangwansen.click/mcp
+
+scope 是否属于 allowed_scopes
+
+code_challenge 是否存在
+
+code_challenge_method == S256
+```
+
+任一失败：
+
+```text
+不签发 Authorization Code
+```
+
+---
+
+# 13. 复用 XINGYU 后台登录
+
+不需要再做：
+
+```text
+Google 登录
+GitHub 登录
+新的用户名密码系统
+```
+
+OAuth Owner Authentication 直接复用：
+
+```text
+XINGYU 博客后台登录 Session
+```
+
+流程：
+
+```text
+Grok
+  ↓
+/oauth/authorize
+  ↓
+是否已经登录 XINGYU Admin？
+  │
+  ├─ 否
+  │   ↓
+  │  登录后台
+  │   ↓
+  │  返回原 OAuth Request
+  │
+  └─ 是
+      ↓
+    Consent
+```
+
+因此 OAuth Server 不负责重新发明身份系统。
+
+它只负责：
+
+```text
+当前已登录的博客主人
+是否授权这个 AI Client
+```
+
+---
+
+# 14. Consent 授权页面
+
+建议页面：
+
+```text
+┌─────────────────────────────────────────┐
+│                                         │
+│              XINGYU                     │
+│                                         │
+│     Grok 请求访问你的星屿博客           │
+│                                         │
+│  客户端                                 │
+│  Grok · XINGYU                          │
+│                                         │
+│  请求权限                               │
+│                                         │
+│  ✓ 阅读博客内容                         │
+│  ✓ 创建与修改草稿                       │
+│  ✓ 保持连接                             │
+│                                         │
+│            [取消]   [允许访问]          │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+如果请求：
+
+```text
+xingyu.publish
+```
+
+增加明显提示：
+
+```text
+⚠ 此客户端还将获得修改线上内容、
+   发布文章和撤回文章的能力。
+
+   具体发布操作仍需要 XINGYU 的显式确认。
+```
+
+---
+
+# 15. Authorization Code
+
+点击：
+
+```text
+允许访问
+```
+
+生成随机 Authorization Code：
+
+```text
+xy_code_<random>
+```
+
+设计参数：
+
+```text
+随机强度：
+至少 32 bytes
+
+有效期：
+5 分钟
+
+使用次数：
+1 次
+
+数据库：
+只保存 SHA-256 Hash
+
+明文：
+只返回给 Client
+```
+
+数据库绝不保存：
+
+```text
+xy_code_完整原文
+```
+
+而保存：
+
+```text
+SHA256(xy_code_...)
+```
+
+成功后：
+
+```http
+302 Location: <registered_redirect_uri>?code=<authorization_code>&state=<original_state>
+```
+
+`state` 原样返回给 Grok。
+
+---
+
+# 16. `/oauth/token` Authorization Code Exchange
+
+Grok：
+
+```http
+POST /oauth/token
+Content-Type: application/x-www-form-urlencoded
+```
+
+Body：
+
+```text
+grant_type=authorization_code
+code=...
+client_id=grok-xingyu
+redirect_uri=...
+code_verifier=...
+resource=https://zhangwansen.click/mcp
+```
+
+XINGYU 校验：
+
+```text
+code 是否存在
+code 是否过期
+code 是否已使用
+
+client_id 是否一致
+
+redirect_uri 是否与授权请求完全一致
+
+resource 是否一致
+
+PKCE:
+BASE64URL(SHA256(code_verifier))
+==
+code_challenge
+```
+
+所有条件通过后：
+
+```text
+在同一事务中：
+
+1. Authorization Code 标记 consumed
+2. 生成 Access Token
+3. 如有 offline_access，生成 Refresh Token
+```
+
+---
+
+# 17. Access Token 设计
+
+使用 opaque token，不使用 JWT。
+
+格式：
+
+```text
+xy_at_<random>
+```
+
+例如逻辑结构：
+
+```text
+prefix    = xy_at_
+random    = 32~48 bytes cryptographic random
+encoding  = base64url
+```
+
+数据库只保存：
+
+```text
+SHA256(access_token)
+```
+
+推荐：
+
+```text
+Access Token TTL:
+60 分钟
+```
+
+这是 XINGYU 自己的产品选择，不属于协议固定值。
+
+Access Token Record：
+
+```text
+client_id
+subject
+scope
+resource
+expires_at
+revoked_at
+created_at
+last_used_at
+```
+
+---
+
+# 18. Refresh Token
+
+只有请求包含：
+
+```text
+offline_access
+```
+
+才签发：
+
+```text
+xy_rt_<random>
+```
+
+Token Response：
+
+```json
+{
+  "access_token": "xy_at_xxxxxxxxx",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "xy_rt_xxxxxxxxx",
+  "scope": "xingyu.read xingyu.draft offline_access"
+}
+```
+
+ChatGPT 官方目前特别建议 OAuth MCP 配置 Refresh Token / `offline_access`，否则原始授权过期后可能失去连接、需要用户重新认证。
+
+所以 XINGYU 第一版就把 Refresh Token 做好，避免以后再改协议。
+
+---
+
+# 19. Refresh Token Rotation
+
+请求：
+
+```text
+grant_type=refresh_token
+refresh_token=xy_rt_xxxxx
+client_id=grok-xingyu
+```
+
+成功：
+
+```text
+旧 Refresh Token
+       ↓
+立即失效
+       ↓
+生成新 Access Token
++
+生成新 Refresh Token
+```
+
+形成：
+
+```text
+RT1 → RT2 → RT3 → RT4
+```
+
+如果已经用过的：
+
+```text
+RT1
+```
+
+再次出现：
+
+```text
+Refresh Token Reuse Detected
+```
+
+则：
+
+```text
+撤销该 Token Family
+```
+
+要求客户端重新授权。
+
+当前 MCP OAuth 安全规范要求 public client 的 Refresh Token 采取 rotation 等保护措施。
+
+---
+
+# 20. 数据库设计
+
+## `oauth_clients`
+
+```text
+id
+
+client_id
+client_name
+
+client_type
+  public
+  confidential
+
+client_secret_hash
+  nullable
+
+redirect_uris
+  JSON / relation
+
+allowed_scopes
+
+token_endpoint_auth_method
+
+enabled
+
+created_at
+updated_at
+```
+
+Grok：
+
+```text
+client_id:
+grok-xingyu
+
+client_secret_hash:
+NULL
+
+client_type:
+public
+```
+
+---
+
+## `oauth_authorization_codes`
+
+```text
+id
+
+code_hash
+
+client_id
+subject
+
+redirect_uri
+resource
+scope
+
+code_challenge
+code_challenge_method
+
+expires_at
+used_at
+
+created_at
+```
+
+要求：
+
+```text
+code_hash UNIQUE
+```
+
+---
+
+## `oauth_access_tokens`
+
+```text
+id
+
+token_hash
+
+client_id
+subject
+
+resource
+scope
+
+expires_at
+revoked_at
+last_used_at
+
+created_at
+```
+
+要求：
+
+```text
+token_hash UNIQUE
+```
+
+---
+
+## `oauth_refresh_tokens`
+
+```text
+id
+
+token_hash
+
+family_id
+parent_token_id
+
+client_id
+subject
+
+resource
+scope
+
+expires_at
+
+used_at
+revoked_at
+
+created_at
+```
+
+---
+
+## `oauth_consents`
+
+```text
+id
+
+subject
+
+client_id
+resource
+
+granted_scopes
+
+granted_at
+revoked_at
+```
+
+这样以后后台可以看到：
+
+```text
+哪些客户端有权限访问 XINGYU
+```
+
+---
+
+# 21. OAuth 管理页面
+
+建议在博客后台增加：
+
+```text
+设置
+└── AI / MCP 连接
+```
+
+页面：
+
+```text
+AI 与 MCP 连接
+────────────────────────────────
+
+ChatGPT · Legacy
+状态：已连接
+方式：Legacy Token
+最后使用：2 分钟前
+
+[Grok · XINGYU]
+状态：已连接
+权限：
+  阅读
+  草稿写入
+  保持登录
+
+最后使用：
+今天 18:12
+
+[撤销访问]
+
+
+未来 ChatGPT OAuth
+状态：未连接
+```
+
+如果有：
+
+```text
+xingyu.publish
+```
+
+单独标：
+
+```text
+线上发布权限
+```
+
+---
+
+# 22. 撤销授权
+
+Endpoint：
+
+```text
+POST /oauth/revoke
+```
+
+后台点击：
+
+```text
+撤销 Grok
+```
+
+执行：
+
+```text
+oauth_consents.revoked_at = now
+
+所有 client_id = grok-xingyu
+且 subject = owner
+
+Access Token 全部 revoked
+
+Refresh Token Family 全部 revoked
+```
+
+随后 Grok 再请求：
+
+```text
+/mcp
+```
+
+返回：
+
+```text
+401 Unauthorized
+```
+
+必须重新完成 OAuth 才能连接。
+
+---
+
+# 23. Tool Annotations
+
+XINGYU MCP Tool 建议补充标准 Tool Annotations。
+
+MCP Schema 支持：
+
+```text
+readOnlyHint
+destructiveHint
+idempotentHint
+openWorldHint
+```
+
+这些是给客户端理解工具风险的提示，不能代替真正的服务器权限检查。
+
+建议：
+
+| Tool                | readOnly | destructive | idempotent |
+| ------------------- | -------: | ----------: | ---------: |
+| `list_categories`   |     true |       false |       true |
+| `search_posts`      |     true |       false |       true |
+| `get_post`          |     true |       false |       true |
+| `get_page`          |     true |       false |       true |
+| `list_mcp_activity` |     true |       false |       true |
+| `create_draft`      |    false |       false |      false |
+| `update_post`       |    false |        true |       true |
+| `update_page`       |    false |        true |       true |
+| `publish_post`      |    false |        true |       true |
+| `unpublish_post`    |    false |        true |       true |
+
+这些 Annotation 只是描述。
+
+真正的权限仍必须：
+
+```text
+Tool Handler
+↓
+requireScope(...)
+```
+
+---
+
+# 24. Tool Handler 权限模式
+
+例如：
+
+```ts
+async function createDraft(ctx, args) {
+  requireScope(ctx.auth, "xingyu.draft")
+
+  return createDraftInternal(args)
+}
+```
+
+`publish_post`：
+
+```ts
+async function publishPost(ctx, args) {
+  requireScope(ctx.auth, "xingyu.publish")
+
+  requireExplicitUserConfirmation(ctx)
+
+  return publishPostInternal(args)
+}
+```
+
+`update_post`：
+
+```ts
+async function updatePost(ctx, args) {
+  const post = await getPost(args.identifier)
+
+  if (post.status === "published") {
+    requireScope(ctx.auth, "xingyu.publish")
+    requireExplicitUserConfirmation(ctx)
+  } else {
+    requireScope(ctx.auth, "xingyu.draft")
+  }
+
+  return updatePostInternal(args)
+}
+```
+
+这一步非常关键。
+
+**绝不能仅在 OAuth 登录时判断 Scope，然后内部 Tool 不再判断。**
+
+---
+
+# 25. Scope 不足
+
+例如 Grok Token：
+
+```text
+xingyu.read
+xingyu.draft
+```
+
+调用：
+
+```text
+publish_post
+```
+
+返回：
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+例如：
+
+```json
+{
+  "error": "insufficient_scope",
+  "required_scope": "xingyu.publish"
+}
+```
+
+不要返回：
+
+```text
+401
+```
+
+因为它已经登录，只是没有权限。
+
+---
+
+# 26. Token Resource Binding
+
+所有 OAuth Token 都保存：
+
+```text
+resource =
+https://zhangwansen.click/mcp
+```
+
+验证时：
+
+```text
+token.resource
+==
+expectedMcpResource
+```
+
+否则拒绝。
+
+例如一个未来用于：
+
+```text
+https://zhangwansen.click/api/admin
+```
+
+的 Token：
+
+```text
+不能拿去调用 /mcp
+```
+
+MCP 当前授权规范明确要求客户端在授权和 Token 请求中指定目标 Resource，Resource Server 也需要确认 Token 是为自己签发的，禁止 Token Passthrough。
+
+---
+
+# 27. Token 生命周期
+
+本项目建议：
+
+```text
+Authorization Code
+5 分钟
+
+Access Token
+60 分钟
+
+Refresh Token
+30 天无活动过期
+
+Refresh Token 最大生命周期
+90 天
+```
+
+这是 XINGYU 自己的安全策略，可以后续调整。
+
+对于高风险：
+
+```text
+xingyu.publish
+```
+
+未来还可以设置：
+
+```text
+重新授权周期更短
+```
+
+但第一版无需增加复杂度。
+
+---
+
+# 28. 日志与审计
+
+禁止记录：
+
+```text
+access_token 原文
+refresh_token 原文
+authorization_code 原文
+XINGYU_BLOG_MCP_TOKEN
+code_verifier
+```
+
+可以记录：
+
+```text
+event
+client_id
+subject
+scopes
+resource
+
+token_id
+token_family_id
+
+result
+error_code
+
+timestamp
+```
+
+推荐 Event：
+
+```text
+oauth.authorization.started
+
+oauth.consent.granted
+oauth.consent.denied
+
+oauth.code.issued
+oauth.code.rejected
+
+oauth.token.issued
+oauth.token.refreshed
+oauth.token.revoked
+
+oauth.refresh_reuse_detected
+
+mcp.auth.failed
+mcp.scope.denied
+```
+
+这些可以和现有：
+
+```text
+list_mcp_activity
+```
+
+结合。
+
+---
+
+# 29. 安全要求
+
+必须做到：
+
+```text
+所有 Endpoint HTTPS
+
+redirect_uri 完全匹配
+
+PKCE 只接受 S256
+
+Authorization Code 一次性
+
+Access Token 短生命周期
+
+Refresh Token rotation
+
+Token 数据库只保存 hash
+
+resource 严格校验
+
+Scope 每次 Tool Call 强制校验
+
+禁止 Token 出现在 URL Query
+
+禁止 Token 写日志
+
+登录后的 Consent POST 做 CSRF 防护
+
+/oauth/token 做 Rate Limit
+
+/oauth/authorize 做 Rate Limit
+
+Authorization Code Exchange 原子事务
+
+Refresh Token Rotation 原子事务
+```
+
+MCP OAuth 规范要求 HTTP 授权端点通过安全通信，并规定 Bearer Access Token 应通过 `Authorization` Header 携带，而不是放进 URL Query。
+
+---
+
+# 30. 不使用 JWT
+
+第一版建议：
+
+```text
+不要 JWT
+```
+
+采用：
+
+```text
+Opaque Access Token
++
+数据库查询
+```
+
+原因：
+
+```text
+XINGYU 是单用户个人服务
+
+OAuth Client 数量极少
+
+需要方便立即撤销
+
+无需 JWKS
+
+无需 key rotation 基础设施
+
+无需处理 JWT audience / kid / signing key 运维
+```
+
+例如：
+
+```text
+xy_at_YHFx.....
+```
+
+服务器：
+
+```text
+SHA256(token)
+↓
+oauth_access_tokens
+```
+
+即可。
+
+未来如果 XINGYU 做成多人 SaaS，再考虑 JWT。
+
+---
+
+# 31. Grok 最终配置
+
+OAuth 服务开发完成后，Grok 配置：
+
+```text
+MCP 地址
+
+https://zhangwansen.click/mcp
+```
+
+```text
+客户端 ID
+
+grok-xingyu
+```
+
+```text
+客户端密钥
+
+留空
+```
+
+```text
+授权端点
+
+https://zhangwansen.click/oauth/authorize
+```
+
+```text
+令牌端点
+
+https://zhangwansen.click/oauth/token
+```
+
+第一阶段 Scope：
+
+```text
+xingyu.read xingyu.draft offline_access
+```
+
+Token Authentication：
+
+```text
+无（仅 PKCE）
+```
+
+第二阶段需要让 Grok 发布时再改为：
+
+```text
+xingyu.read
+xingyu.draft
+xingyu.publish
+offline_access
+```
+
+xAI 当前官方文档支持自定义公网 MCP Connector，并要求提供 MCP Server URL 和完成所需认证；Grok Build 对需要 OAuth 的 MCP 也会触发浏览器授权流程。
+
+---
+
+# 32. ChatGPT 兼容策略
+
+## 阶段 A：现在
+
+完全不动：
+
+```text
+ChatGPT
+↓
+XINGYU_BLOG_MCP_TOKEN
+↓
+/mcp
+```
+
+---
+
+## 阶段 B：OAuth 上线
+
+```text
+ChatGPT
+↓
+Legacy Token
+↓
+/mcp
+
+
+Grok
+↓
+OAuth
+↓
+/mcp
+```
+
+两套同时存在。
+
+---
+
+## 阶段 C：未来可选
+
+如果决定让 ChatGPT 也使用 OAuth：
+
+```text
+ChatGPT
+↓
+OAuth 2.1
+↓
+/oauth/authorize
+↓
+/oauth/token
+↓
+/mcp
+```
+
+ChatGPT 当前自定义 MCP App 支持配置使用 OAuth 的 MCP Server，并在工具扫描过程中完成 OAuth 授权；OpenAI 同时建议 OAuth Provider 提供 Refresh Token / `offline_access` 来维持长期连接。
+
+等新 OAuth ChatGPT 验证稳定后，才考虑撤掉：
+
+```text
+XINGYU_BLOG_MCP_TOKEN
+```
+
+不是现在撤。
+
+---
+
+# 33. Legacy Token 生命周期
+
+上线初期：
+
+```text
+Legacy Token
+✅ 保留
+```
+
+OAuth 验证稳定后：
+
+```text
+Legacy Token
+✅ 仍可保留
+```
+
+以后如果所有客户端都迁移：
+
+```text
+Legacy Token
+→ rotate
+→ revoke
+→ 删除兼容 Auth Branch
+```
+
+但这属于后续版本。
+
+第一版不要做。
+
+---
+
+# 34. 推荐部署步骤
+
+### Phase 1 — 数据库
+
+增加：
+
+```text
+oauth_clients
+oauth_authorization_codes
+oauth_access_tokens
+oauth_refresh_tokens
+oauth_consents
+```
+
+---
+
+### Phase 2 — Discovery
+
+上线：
+
+```text
+/.well-known/oauth-protected-resource/mcp
+
+/.well-known/oauth-authorization-server
+```
+
+不会影响现有 ChatGPT。
+
+---
+
+### Phase 3 — OAuth Core
+
+上线：
+
+```text
+/oauth/authorize
+/oauth/token
+/oauth/revoke
+```
+
+---
+
+### Phase 4 — Dual Auth
+
+将 `/mcp` 从：
+
+```text
+只接受 Legacy Token
+```
+
+改为：
+
+```text
+Legacy Token
+OR
+OAuth Access Token
+```
+
+---
+
+### Phase 5 — 回归 ChatGPT
+
+第一件事不是测试 Grok。
+
+而是先测试：
+
+```text
+当前 ChatGPT
+```
+
+要求：
+
+```text
+search_posts ✅
+get_post ✅
+create_draft ✅
+```
+
+确保 OAuth 改造没有破坏 Legacy Auth。
+
+---
+
+### Phase 6 — 获取 Grok Callback
+
+创建：
+
+```text
+grok-xingyu
+```
+
+临时允许 `/oauth/authorize` 输出安全调试信息。
+
+Grok 点：
+
+```text
+保存并连接
+```
+
+取得实际：
+
+```text
+redirect_uri
+```
+
+验证域名来源后加入白名单。
+
+---
+
+### Phase 7 — Grok Read Test
+
+Scope：
+
+```text
+xingyu.read
+offline_access
+```
+
+测试：
+
+```text
+搜索文章
+读取文章
+查看分类
+```
+
+---
+
+### Phase 8 — Grok Draft Test
+
+增加：
+
+```text
+xingyu.draft
+```
+
+测试：
+
+```text
+创建草稿
+修改草稿
+```
+
+确认不能：
+
+```text
+发布文章
+修改已发布文章
+更新公开页面
+```
+
+---
+
+### Phase 9 — Publish Test
+
+最后才增加：
+
+```text
+xingyu.publish
+```
+
+测试：
+
+```text
+发布仍需明确确认
+
+撤回仍需明确确认
+
+修改线上文章仍需明确确认
+```
+
+---
+
+# 35. 验收测试
+
+上线前必须全部通过：
+
+* [ ] 当前 ChatGPT Legacy Token 可正常访问 `/mcp`
+* [ ] 错误 Legacy Token 返回 `401`
+* [ ] 无 Token 的 `/mcp` 返回带 Resource Metadata 的 OAuth Challenge
+* [ ] Protected Resource Metadata 正确
+* [ ] Authorization Server Metadata 正确
+* [ ] Grok 可以打开 Consent 页面
+* [ ] 未登录用户会先进入 XINGYU 后台登录
+* [ ] 未登记 `redirect_uri` 被拒绝
+* [ ] 错误 `resource` 被拒绝
+* [ ] 非 `S256` PKCE 被拒绝
+* [ ] 错误 `code_verifier` 无法兑换 Token
+* [ ] Authorization Code 只能兑换一次
+* [ ] 过期 Authorization Code 无法兑换
+* [ ] Access Token 可以调用 `/mcp`
+* [ ] Access Token 过期返回 `401`
+* [ ] Draft Scope 无法调用 Publish Tool
+* [ ] Draft Scope 无法修改已发布文章
+* [ ] Publish Scope 仍需要发布确认
+* [ ] Refresh Token 可以换新 Access Token
+* [ ] Refresh Token 每次使用都会 Rotation
+* [ ] 已使用 Refresh Token 再次出现触发 Reuse Protection
+* [ ] 后台点击撤销后 Grok Token 立即失效
+* [ ] 日志中不存在任何 Token 原文
+* [ ] ChatGPT 和 Grok 可以同时访问 XINGYU
+
+---
+
+# 36. 第一版明确不做什么
+
+不做：
+
+```text
+Auth0
+Keycloak
+
+Google OAuth 登录
+GitHub OAuth 登录
+
+JWT
+JWKS
+
+多租户
+多人账户系统
+
+复杂 RBAC
+
+Dynamic Client Registration
+```
+
+原因：
+
+```text
+这些都不是解决 Grok → XINGYU 所必需的。
+```
+
+第一版只做：
+
+```text
+单用户
+静态注册 OAuth Client
+Authorization Code
+PKCE S256
+Opaque Token
+Refresh Token Rotation
+Scope
+Dual Auth
+```
+
+---
+
+# 37. 第二版可扩展能力
+
+未来可以增加：
+
+```text
+/oauth/register
+```
+
+Dynamic Client Registration。
+
+或者按较新的 MCP 授权方向支持：
+
+```text
+OAuth Client ID Metadata Documents
+```
+
+以减少不同 MCP 客户端手动创建 Client ID 的配置工作。当前 MCP 规范已经推荐客户端和授权服务支持 Client ID Metadata Documents，同时仍允许 Dynamic Client Registration。
+
+还可以增加：
+
+```text
+按客户端单独授权
+
+ChatGPT
+Grok
+Claude
+Cursor
+其他 Agent
+```
+
+最终形成：
+
+```text
+                     XINGYU
+                       │
+                 OAuth 2.1 Server
+                       │
+       ┌───────────────┼────────────────┐
+       │               │                │
+       ▼               ▼                ▼
+    ChatGPT           Grok          Other Agent
+       │               │                │
+       └───────────────┼────────────────┘
+                       ▼
+                /mcp Protected Resource
+```
+
+---
+
+# 38. 推荐项目目录
+
+具体框架未知，因此下面使用逻辑目录：
+
+```text
+src/
+├── auth/
+│   ├── mcp-auth.ts
+│   ├── legacy-auth.ts
+│   ├── oauth-auth.ts
+│   ├── scopes.ts
+│   └── token.ts
+│
+├── oauth/
+│   ├── authorize.ts
+│   ├── token.ts
+│   ├── revoke.ts
+│   ├── metadata.ts
+│   ├── pkce.ts
+│   ├── consent.ts
+│   └── errors.ts
+│
+├── mcp/
+│   ├── server.ts
+│   ├── tools/
+│   └── permissions.ts
+│
+├── db/
+│   └── oauth/
+│
+└── admin/
+    └── integrations/
+```
+
+---
+
+# 39. 环境变量
+
+保留：
+
+```text
+XINGYU_BLOG_MCP_TOKEN
+```
+
+增加：
+
+```text
+XINGYU_OAUTH_ISSUER=https://zhangwansen.click
+
+XINGYU_MCP_RESOURCE=https://zhangwansen.click/mcp
+
+XINGYU_OAUTH_ACCESS_TOKEN_TTL=3600
+
+XINGYU_OAUTH_AUTH_CODE_TTL=300
+```
+
+不要增加：
+
+```text
+GROK_CLIENT_SECRET
+```
+
+因为：
+
+```text
+grok-xingyu = public OAuth client
+```
+
+---
+
+# 40. 上线完成后的最终状态
+
+```text
+┌───────────────────────────────────────────────┐
+│                    XINGYU                     │
+│                                               │
+│   zhangwansen.click                           │
+│                                               │
+│   ┌───────────────────────────────────────┐   │
+│   │ OAuth Authorization Server            │   │
+│   │                                       │   │
+│   │ /.well-known/...                      │   │
+│   │ /oauth/authorize                      │   │
+│   │ /oauth/token                          │   │
+│   │ /oauth/revoke                         │   │
+│   └──────────────────────┬────────────────┘   │
+│                          │                    │
+│                   OAuth Tokens                │
+│                          │                    │
+│   ┌──────────────────────▼────────────────┐   │
+│   │               /mcp                    │   │
+│   │                                       │   │
+│   │ Legacy Bearer  ✅                     │   │
+│   │ OAuth Bearer   ✅                     │   │
+│   │ Scope Check    ✅                     │   │
+│   │ Confirmations  ✅                     │   │
+│   └───────────────────────────────────────┘   │
+│                                               │
+└───────────────────────────────────────────────┘
+
+             ▲                      ▲
+             │                      │
+     Legacy Bearer Token        OAuth + PKCE
+             │                      │
+         ChatGPT                  Grok
+```
+
+---
+
+# 41. 最终开发合同
+
+如果只保留一句话给开发者，就是：
+
+> 在不改变现有 `https://zhangwansen.click/mcp` 和 `XINGYU_BLOG_MCP_TOKEN` 工作方式的前提下，为 XINGYU 增加同域 OAuth 2.1 Authorization Server，支持 Authorization Code + PKCE S256、Protected Resource Metadata、Authorization Server Metadata、Opaque Access Token、Refresh Token Rotation、Resource Binding 和 Scope Enforcement；Grok 注册为无 Client Secret 的 Public Client `grok-xingyu`，默认只授权 `xingyu.read xingyu.draft offline_access`，发布权限独立授予；所有 MCP Tool 在服务端再次执行 Scope 检查，现有发布/撤回/公开页面修改的显式确认机制保持不变。
