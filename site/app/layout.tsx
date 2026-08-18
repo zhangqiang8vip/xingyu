@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import ScrollIndicator from "./ScrollIndicator";
@@ -7,6 +7,8 @@ import { getSiteSettings } from "../db/queries";
 import DismissibleDetails from "./DismissibleDetails";
 
 const preferenceBootstrap = `(function(){try{var root=document.documentElement;var themeSaved=localStorage.getItem("xingyu-theme-mode");var legacy=localStorage.getItem("xingyu-theme");var theme=(themeSaved==="light"||themeSaved==="dark"||themeSaved==="system")?themeSaved:((legacy==="light"||legacy==="dark")?legacy:"system");var dark=theme==="system"?matchMedia("(prefers-color-scheme: dark)").matches:theme==="dark";var readingSaved=localStorage.getItem("xingyu-reading-mode");var reading=readingSaved==="page"?"page":"modal";var motionSaved=localStorage.getItem("xingyu-motion-mode");var motion=(motionSaved==="flip"||motionSaved==="static")?motionSaved:(matchMedia("(prefers-reduced-motion: reduce)").matches?"static":"flip");root.dataset.themeMode=theme;root.dataset.theme=dark?"dark":"light";root.dataset.readingMode=reading;root.dataset.motionMode=motion;root.style.colorScheme=dark?"dark":"light"}catch(e){}})();`;
+
+export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
 export async function generateMetadata():Promise<Metadata>{
   const settings=await getSiteSettings();

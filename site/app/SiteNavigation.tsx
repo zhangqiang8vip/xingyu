@@ -1,16 +1,16 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import MotionModeToggle from "./MotionModeToggle";
-import ReadingModeToggle from "./ReadingModeToggle";
-import ThemeToggle from "./ThemeToggle";
+import DesktopIslandNav from "./nav/DesktopIslandNav";
+import MobileIslandMenu from "./nav/MobileIslandMenu";
+import type { NavCurrent } from "./nav/nav-destinations";
 
 type Props = {
   brandName: string;
   children: ReactNode;
-  current?: "home" | "archive" | "connect" | "about";
+  current?: NavCurrent;
 };
 
-/** Shared navigation keeps public pages structurally identical as controls evolve. */
+/** Shared island chrome. Desktop/tablet and phone are separate trees. */
 export default function SiteNavigation({ brandName, children, current }: Props) {
   return <header className="site-nav">
     <nav>
@@ -19,19 +19,8 @@ export default function SiteNavigation({ brandName, children, current }: Props) 
         <span className="brand-orbit" aria-hidden="true"><i /></span>
       </Link>
       {children}
-      <div className="nav-links">
-        <div className="nav-primary">
-          <Link className={current === "home" ? "nav-current" : undefined} aria-current={current === "home" ? "page" : undefined} href="/">首页</Link>
-          <Link className={current === "archive" ? "nav-current" : undefined} aria-current={current === "archive" ? "page" : undefined} href="/archive">文章</Link>
-          <Link className={current === "connect" ? "nav-current" : undefined} aria-current={current === "connect" ? "page" : undefined} href="/connect">接入</Link>
-          <Link className={current === "about" ? "nav-current" : undefined} aria-current={current === "about" ? "page" : undefined} href="/about">关于</Link>
-        </div>
-        <div className="nav-tools">
-          <ReadingModeToggle />
-          <MotionModeToggle />
-          <ThemeToggle />
-        </div>
-      </div>
+      <DesktopIslandNav current={current} />
+      <MobileIslandMenu current={current} />
     </nav>
   </header>;
 }
