@@ -18,19 +18,19 @@ test("OAuth tables and dual auth stay beside the existing MCP token", async () =
     source("db/schema.ts"),
     source("db/bootstrap.ts"),
     source("worker/index.ts"),
-    source("worker/blog-mcp.ts"),
+    source("worker/mcp/read-tools.ts"),
     source("worker/mcp-auth.ts"),
   ]);
   assert.match(schema, /oauthClients = sqliteTable\("oauth_clients"/);
   assert.match(schema, /oauthRefreshTokens = sqliteTable\("oauth_refresh_tokens"/);
-  assert.match(bootstrap, /schemaVersion = "10"/);
+  assert.match(bootstrap, /schemaVersion = "11"/);
   assert.match(bootstrap, /grok-xingyu/);
+  assert.match(bootstrap, /chatgpt-xingyu/);
   assert.match(worker, /isOAuthPath/);
   assert.match(worker, /handleBlogMcpRequest/);
-  assert.match(mcp, /authenticateMcp/);
+  assert.match(await source("worker/blog-mcp.ts"), /authenticateMcp/);
   assert.match(mcp, /requireScope\(auth, "xingyu.read"\)/);
-  assert.match(mcp, /requireScope\(auth, current.status === "published" \? "xingyu.publish" : "xingyu.draft"\)/);
-  assert.match(auth, /authType: "legacy"/);
+  assert.match(await source("worker/mcp/draft-tools.ts"), /scopeForPostWrite\(current.status\)/);
   assert.match(auth, /xy_at_/);
   assert.doesNotMatch(mcp, /MCP 写作服务尚未配置/);
 });

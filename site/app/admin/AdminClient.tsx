@@ -5,6 +5,7 @@ import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel"
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";
 import { CONTENT_LIMITS } from "../site-config";
 import AdminCategoriesPanel from "./AdminCategoriesPanel";
+import AdminIntegrationsPanel from "./AdminIntegrationsPanel";
 import AdminSpacesPanel from "./AdminSpacesPanel";
 import ArticleWritingStudio, { useSplitScrollSync } from "./ArticleWritingStudio";
 import AdminArticleSearch from "./AdminArticleSearch";
@@ -13,13 +14,13 @@ import AdminArticlesPanel from "./AdminArticlesPanel";
 import AdminSidebar from "./AdminSidebar";
 import AdminArticleEditor from "./AdminArticleEditor";
 import AdminPreviewShareDialog from "./AdminPreviewShareDialog";
-import type { AdminCategory, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
+import type { AdminCategory, AdminMcpConnection, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
 import { readApiJson } from "../api-response";
 import ModalPostLink from "../ModalPostLink";
 
 const emptyForm = (categoryId = 1,spaceId:number|null=null,spacePath=""): ArticleForm => ({ title: "", slug: "", excerpt: "", content: "", categoryId, spaceId,spacePath,status: "draft", featured: false, publishedAt:null });
 
-export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; userName: string; signOutPath: string }) {
+export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; userName: string; signOutPath: string }) {
   const articleEditorPreviewRef=useRef<HTMLDivElement>(null);
   const [section,setSection]=useState<AdminSection>("browse");
   const [spaceLandingId,setSpaceLandingId]=useState<number|null>(null);
@@ -181,11 +182,12 @@ export default function AdminClient({ categories:initialCategories, settings, co
   return (
     <main className={`admin-shell${sidebarCollapsed?" sidebar-collapsed":""}`}>
       <AdminSidebar brandName={settings.brandName} avatarUrl={settings.avatarUrl} authorName={settings.authorName} userName={userName} section={section} stats={stats} categoryCount={categories.length} collapsed={sidebarCollapsed} onSectionChange={changeSection} onToggle={toggleSidebar} onSignOut={()=>void signOut()}/>
-      <div className="admin-search-island">
-        <AdminArticleSearch disabled={Boolean(form||studio)} articleCount={stats.total+stats.privateArticles} onBrowse={(postId)=>void browseById(postId)}/>
+      <div className="admin-workspace">
+        <div className="admin-workspace-bar">
+          <AdminArticleSearch disabled={Boolean(form||studio)} articleCount={stats.total+stats.privateArticles} onBrowse={(postId)=>void browseById(postId)}/>
+        </div>
+      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>setSection("articles")} onOpenSpaces={(spaceId)=>{setCreateSpaceOnOpen(false);setSpaceLandingId(spaceId??null);setSection("spaces")}} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={(value)=>{setQuery(value);resetCursor()}} onCategoryChange={(value)=>{setCategory(value);resetCursor()}} onStatusChange={(value)=>{setStatus(value);resetCursor()}} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId)} onShare={setSharePost} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId)=>void browseById(postId)} onShareArticle={setSharePost} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="integrations" ? <AdminIntegrationsPanel initial={connections} /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
       </div>
-
-      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>setSection("articles")} onOpenSpaces={(spaceId)=>{setCreateSpaceOnOpen(false);setSpaceLandingId(spaceId??null);setSection("spaces")}} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={(value)=>{setQuery(value);resetCursor()}} onCategoryChange={(value)=>{setCategory(value);resetCursor()}} onStatusChange={(value)=>{setStatus(value);resetCursor()}} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId)} onShare={setSharePost} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId)=>void browseById(postId)} onShareArticle={setSharePost} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
 
       {form&&<AdminArticleEditor form={form} category={selectedFormCategory} categories={categories} settings={settings} message={message} previewRef={articleEditorPreviewRef} onChange={setForm} onChangeSpace={changeSpace} onClose={closeEditor} onOpenStudio={setStudio} onSharePreview={form.id?()=>setSharePost({id:form.id!,title:form.title}):undefined} onSave={save}/>}
       {form&&studio&&<ArticleWritingStudio draft={form} categoryName={selectedFormCategory?.name??"随笔"} categoryColor={selectedFormCategory?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} initialMode={studio} onChange={(content)=>setForm(current=>current?{...current,content}:current)} onClose={()=>setStudio(null)}/>}

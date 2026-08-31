@@ -3,6 +3,13 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const mcpSource = async () => (await Promise.all([
+  source("worker/blog-mcp.ts"),
+  source("worker/mcp/read-tools.ts"),
+  source("worker/mcp/space-tools.ts"),
+  source("worker/mcp/draft-tools.ts"),
+  source("worker/mcp/publish-tools.ts"),
+])).join("\n");
 const generatedMigration = async () => {
   const directory = new URL("../drizzle/", import.meta.url);
   const candidates = (await readdir(directory))
@@ -73,7 +80,9 @@ test("public pages consume editable settings and shared presentation helpers", a
   assert.match(home, /<SiteNavigation/);
   assert.match(about, /<SiteNavigation/);
   assert.match(post, /<SiteNavigation/);
-  assert.match(navigation, /<ReadingModeToggle \/>/);
+  assert.match(navigation, /<DesktopIslandNav/);
+  assert.match(navigation, /<MobileIslandMenu/);
+  assert.doesNotMatch(navigation, /nav-primary/);
   assert.match(about, /getContentPage\("about"\)/);
   assert.match(about, /MarkdownRenderer/);
   assert.match(post, /PostViewTracker/);
@@ -84,6 +93,30 @@ test("public pages consume editable settings and shared presentation helpers", a
   assert.doesNotMatch(admin, /数据模式<\/span><b>海量|<b>∞<\/b>/);
 });
 
+test("public island navigation keeps desktop and phone trees apart", async () => {
+  const [navigation, desktop, mobile, tools, destinations, css] = await Promise.all([
+    source("app/SiteNavigation.tsx"),
+    source("app/nav/DesktopIslandNav.tsx"),
+    source("app/nav/MobileIslandMenu.tsx"),
+    source("app/nav/NavTools.tsx"),
+    source("app/nav/nav-destinations.ts"),
+    source("app/globals.css"),
+  ]);
+  assert.match(navigation, /<DesktopIslandNav/);
+  assert.match(navigation, /<MobileIslandMenu/);
+  assert.doesNotMatch(navigation, /nav-primary|ReadingModeToggle/);
+  assert.match(desktop, /className="nav-links nav-desktop"/);
+  assert.match(mobile, /className=\{`nav-mobile/);
+  assert.match(mobile, /nav-mobile-trigger/);
+  assert.doesNotMatch(mobile, /nav-primary/);
+  assert.match(tools, /<ReadingModeToggle \/>/);
+  assert.match(tools, /<MotionModeToggle \/>/);
+  assert.match(tools, /<ThemeToggle \/>/);
+  assert.match(destinations, /label: "首页"/);
+  assert.match(css, /\.nav-desktop\{display:none!important\}/);
+  assert.match(css, /\.nav-mobile-sheet\{/);
+});
+
 test("published article edits preserve their publication date", async () => {
   const postWrite = await source("db/post-write.ts");
   assert.match(postWrite, /current\[0\]\.publishedAt/);
@@ -92,7 +125,7 @@ test("published article edits preserve their publication date", async () => {
 
 test("remote MCP separates read approvals from important writes and records receipts", async () => {
   const [mcp, schema, bootstrap, activity] = await Promise.all([
-    source("worker/blog-mcp.ts"), source("db/schema.ts"), source("db/bootstrap.ts"),
+    mcpSource(), source("db/schema.ts"), source("db/bootstrap.ts"),
     source("db/mcp-activity.ts"),
   ]);
   assert.match(mcp, /server\.registerTool\("list_mcp_activity"/);
@@ -142,11 +175,16 @@ test("admin previews unsaved content through the real public pages", async () =>
     source("app/admin/article-preview/page.tsx"), source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
     source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
   ]);
-  assert.ok(sidebar.indexOf('label:"浏览"') < sidebar.indexOf('label:"文章管理"'));
-  assert.ok(sidebar.indexOf('label:"文章管理"') < sidebar.indexOf('label:"知识空间"'));
-  assert.ok(sidebar.indexOf('label:"知识空间"') < sidebar.indexOf('label:"首页设置"'));
-  assert.ok(sidebar.indexOf('label:"首页设置"') < sidebar.indexOf('label:"接入设置"'));
-  assert.ok(sidebar.indexOf('label:"接入设置"') < sidebar.indexOf('label:"关于设置"'));
+  assert.ok(sidebar.indexOf('label: "浏览"') < sidebar.indexOf('label: "文章"'));
+  assert.ok(sidebar.indexOf('label: "文章"') < sidebar.indexOf('label: "知识空间"'));
+  assert.ok(sidebar.indexOf('label: "知识空间"') < sidebar.indexOf('label: "首页"'));
+  assert.ok(sidebar.indexOf('label: "首页"') < sidebar.indexOf('label: "关于"'));
+  assert.ok(sidebar.indexOf('label: "关于"') < sidebar.indexOf('label: "分类"'));
+  assert.ok(sidebar.indexOf('label: "分类"') < sidebar.indexOf('label: "接入"'));
+  assert.ok(sidebar.indexOf('label: "接入"') < sidebar.indexOf('label: "AI 连接"'));
+  assert.match(sidebar, /label: "内容"/);
+  assert.match(sidebar, /更多/);
+  assert.match(admin, /admin-workspace-bar/);
   assert.match(homeSettings, /HomeLivePreview settings=\{form\}/);
   assert.match(aboutEditor, /ContentPageLivePreview page=\{form\}/);
   assert.match(articleEditor, /onOpenStudio\("reading"\)/);
@@ -230,7 +268,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "9"/);
+  assert.match(bootstrap,/schemaVersion = "11"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -249,7 +287,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(postsRoute,/scope === "all" \? "all" : scope === "private" \? "private" : "public"/);
   assert.match(postRoute,/hasOwnProperty\.call\(payload,"spaceId"\)\?payload\.spaceId:current\.spaceId/);
   assert.match(viewsRoute,/space_id IS NULL/);
-  assert.match(sidebar,/文章管理[\s\S]*知识空间[\s\S]*接入设置/);
+  assert.match(sidebar,/文章[\s\S]*知识空间[\s\S]*接入/);
   assert.match(articleEditor,/私有知识文章 · 仅管理员与 MCP 可检索/);
   assert.match(admin,/确认移出知识空间吗/);
   assert.match(spacePanel,/顶级空间彼此独立/);
@@ -264,7 +302,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
 test("knowledge-space APIs and MCP expose scoped search with auditable writes", async () => {
   const [spacesApi, spaceApi, postsApi, mcp, activity] = await Promise.all([
     source("app/api/spaces/route.ts"), source("app/api/spaces/[id]/route.ts"),
-    source("app/api/spaces/[id]/posts/route.ts"), source("worker/blog-mcp.ts"),
+    source("app/api/spaces/[id]/posts/route.ts"), mcpSource(),
     source("db/mcp-activity.ts"),
   ]);
   assert.match(spacesApi,/isAdminRequest/);
@@ -274,8 +312,8 @@ test("knowledge-space APIs and MCP expose scoped search with auditable writes", 
     assert.ok(mcp.includes(`server.registerTool("${tool}"`),`missing MCP tool ${tool}`);
   }
   assert.match(mcp,/include_descendants/);
-  assert.match(mcp,/visibility:post\.spaceId\?"space":"public"/);
-  assert.match(mcp,/public_url: post\.status === "published"&&!post\.spaceId/);
+  assert.match(mcp,/visibility: ?post\.spaceId ?\? ?"space" ?: ?"public"/);
+  assert.match(mcp,/public_url: post\.status === "published" ?&& ?!post\.spaceId/);
   assert.match(mcp,/recordSpaceActivitySafely/);
   assert.match(mcp,/activityReceipt\("create_space"/);
   assert.match(mcp,/activityReceipt\("move_space"/);
@@ -327,7 +365,7 @@ test("attachments inherit article visibility and are available to editors and MC
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
     source("app/MarkdownRenderer.tsx"),
     source("app/admin/VditorEditor.tsx"),
-    source("worker/blog-mcp.ts"),
+    mcpSource(),
   ]);
   assert.match(schema, /attachments = sqliteTable\("attachments"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS attachments/);

@@ -95,6 +95,15 @@ approval_mode = "approve"
 [mcp_servers.xingyu_blog.tools.list_mcp_activity]
 approval_mode = "approve"
 
+[mcp_servers.xingyu_blog.tools.list_attachments]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.download_attachment]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.upload_attachment]
+approval_mode = "prompt"
+
 [mcp_servers.xingyu_blog.tools.create_draft]
 approval_mode = "prompt"
 

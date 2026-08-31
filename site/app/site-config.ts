@@ -85,6 +85,15 @@ approval_mode = "approve"
 [mcp_servers.xingyu_blog.tools.get_page]
 approval_mode = "approve"
 
+[mcp_servers.xingyu_blog.tools.list_attachments]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.download_attachment]
+approval_mode = "approve"
+
+[mcp_servers.xingyu_blog.tools.upload_attachment]
+approval_mode = "prompt"
+
 [mcp_servers.xingyu_blog.tools.create_draft]
 approval_mode = "prompt"
 
@@ -120,6 +129,8 @@ approval_mode = "prompt"
 - “搜索星屿里关于 Windows 环境的文章。”
 - “把这份 Markdown 写成草稿，分类放到开发手记。”
 - “读取这篇文章，重写开头，但先不要发布。”
+- “把这张图上传到刚才那篇草稿，并插入正文。”
+- “列出这篇文章已经上传的附件。”
 - “更新接入页面的 Codex 配置，并告诉我改了哪些字段。”
 - “确认无误，发布刚才的草稿。”
 

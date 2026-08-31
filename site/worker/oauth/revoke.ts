@@ -1,5 +1,5 @@
 import { ensureDatabase } from "../../db/bootstrap";
-import { findAccessToken, findRefreshToken, getOAuthClient, hashSecret, revokeConsent, revokeRefreshFamily } from "../../db/oauth";
+import { findAccessToken, findRefreshToken, getOAuthClient, hashSecret, revokeRefreshFamily } from "../../db/oauth";
 import { getDb } from "../../db";
 import { oauthAccessTokens } from "../../db/schema";
 import { eq } from "drizzle-orm";
@@ -27,9 +27,6 @@ export async function handleRevoke(request: Request) {
         .where(eq(oauthAccessTokens.id, row.id));
       oauthLog("oauth.token.revoked", { client_id: row.clientId, kind: "access" });
     }
-  } else if (clientId) {
-    await revokeConsent(clientId, "xingyu-owner");
-    oauthLog("oauth.token.revoked", { client_id: clientId, kind: "consent" });
   }
 
   return new Response(null, { status: 200, headers: { "Cache-Control": "no-store" } });

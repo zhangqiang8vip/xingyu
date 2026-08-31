@@ -13,6 +13,7 @@ import {
   REFRESH_TOKEN_MAX_TTL_SECONDS,
   revokeRefreshFamily,
 } from "../../db/oauth";
+import { refreshTokenDecision } from "../mcp/scope-policy";
 import { OAuthError, oauthLog } from "./errors";
 import { verifyS256 } from "./pkce";
 import { newAccessToken, newFamilyId, newRefreshToken } from "./tokens";
@@ -75,13 +76,12 @@ async function rotateRefresh(origin: string, params: URLSearchParams) {
 
   const row = await findRefreshToken(await hashSecret(refreshToken));
   const now = Math.floor(Date.now() / 1000);
-  if (!row || row.clientId !== clientId) throw new OAuthError("invalid_grant", 400, "刷新令牌无效");
-  if (row.revokedAt || row.expiresAt <= now || row.absoluteExpiresAt <= now) {
-    throw new OAuthError("invalid_grant", 400, "刷新令牌已失效");
-  }
-  if (row.usedAt || !(await markRefreshTokenUsed(row.id))) {
-    await revokeRefreshFamily(row.familyId);
-    oauthLog("oauth.refresh_reuse_detected", { client_id: clientId, family_id: row.familyId });
+  const decision = refreshTokenDecision(row, clientId, now);
+  if (decision === "invalid") throw new OAuthError("invalid_grant", 400, "刷新令牌无效");
+  if (decision === "expired") throw new OAuthError("invalid_grant", 400, "刷新令牌已失效");
+  if (decision === "reuse" || !(row && await markRefreshTokenUsed(row.id))) {
+    if (row) await revokeRefreshFamily(row.familyId);
+    oauthLog("oauth.refresh_reuse_detected", { client_id: clientId, family_id: row?.familyId });
     throw new OAuthError("invalid_grant", 400, "刷新令牌重复使用，已撤销该授权");
   }
   if (row.resource !== mcpResourceFor(origin)) throw new OAuthError("invalid_target", 400, "resource 必须绑定 MCP 端点");

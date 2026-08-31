@@ -1,39 +1,11 @@
 import { env } from "cloudflare:workers";
 import { sha256Bytes, constantTimeBytesEqual } from "../db/admin-session";
 import { ALL_SCOPES, findAccessToken, hashSecret, mcpResourceFor, parseScopeList, touchAccessToken } from "../db/oauth";
-import { unauthorizedChallenge } from "./oauth/metadata";
 import { oauthLog } from "./oauth/errors";
+import { unauthorizedChallenge } from "./oauth/metadata";
+import type { McpAuth } from "./mcp/scope-policy";
 
-export type McpAuth = {
-  authType: "legacy" | "oauth";
-  clientId: string;
-  subject: string;
-  scopes: string[];
-  tokenId?: number;
-};
-
-export class ScopeError extends Error {
-  constructor(readonly requiredScope: string) {
-    super(`insufficient_scope:${requiredScope}`);
-  }
-}
-
-export function requireScope(auth: McpAuth, scope: string) {
-  if (!auth.scopes.includes(scope)) throw new ScopeError(scope);
-}
-
-export function scopeFailure(error: unknown) {
-  if (!(error instanceof ScopeError)) return null;
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify({
-      ok: false,
-      error: "insufficient_scope",
-      required_scope: error.requiredScope,
-    }, null, 2) }],
-    structuredContent: { ok: false, error: "insufficient_scope", required_scope: error.requiredScope },
-    isError: true,
-  };
-}
+export { requireScope, ScopeError, scopeFailure, type McpAuth } from "./mcp/scope-policy";
 
 export async function authenticateMcp(request: Request): Promise<McpAuth | Response> {
   const origin = new URL(request.url).origin;

@@ -17,7 +17,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "10";
+  const schemaVersion = "11";
 
   try {
     const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
@@ -314,6 +314,14 @@ async function initialize() {
     d1.prepare(`INSERT OR IGNORE INTO oauth_clients
       (client_id, client_name, client_type, client_secret_hash, redirect_uris, allowed_scopes, token_endpoint_auth_method, enabled)
       VALUES ('grok-xingyu', 'Grok · XINGYU', 'public', NULL, '[]', 'xingyu.read xingyu.draft xingyu.publish offline_access', 'none', 1)`),
+    d1.prepare(`INSERT OR IGNORE INTO oauth_clients
+      (client_id, client_name, client_type, client_secret_hash, redirect_uris, allowed_scopes, token_endpoint_auth_method, enabled)
+      VALUES ('chatgpt-xingyu', 'ChatGPT · XINGYU', 'public', NULL, ?, 'xingyu.read xingyu.draft xingyu.publish offline_access', 'none', 1)`)
+      .bind(JSON.stringify([
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+        "https://chatgpt.com/oauth/callback",
+        "https://chat.openai.com/oauth/callback",
+      ])),
   ]);
 
   const searchVersion = await d1.prepare("SELECT value FROM app_meta WHERE key = 'posts_fts_version'").first<{ value: string }>();

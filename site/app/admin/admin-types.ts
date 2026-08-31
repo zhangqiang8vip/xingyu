@@ -1,4 +1,26 @@
-export type AdminSection="browse"|"home"|"articles"|"spaces"|"connect"|"about"|"categories";
+export type AdminSection="browse"|"home"|"articles"|"spaces"|"connect"|"integrations"|"about"|"categories";
+
+export type AdminMcpSession = {
+  subject: string;
+  label: string;
+  status: "connected" | "revoked";
+  scopes: string[];
+  grantedAt: string | null;
+  lastUsedAt: string | null;
+  tokenCount: number;
+};
+
+export type AdminMcpConnection = {
+  id: string;
+  name: string;
+  kind: "legacy" | "oauth";
+  status: "configured" | "connected" | "revoked";
+  scopes: string[];
+  lastUsedAt: string | null;
+  lastUsedLabel: string | null;
+  revocable: boolean;
+  sessions: AdminMcpSession[];
+};
 
 export type AdminStats={
   total:number;

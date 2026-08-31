@@ -11,7 +11,7 @@
     "build": "vinext build",
     "deploy:production": "npm run build && wrangler deploy --config wrangler.production.jsonc",
     "start": "vinext start",
-    "test": "npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs tests/oauth-auth.test.mjs",
+    "test": "npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs tests/oauth-auth.test.mjs tests/oauth-protocol.test.mjs tests/mcp-read.test.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"

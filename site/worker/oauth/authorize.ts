@@ -19,8 +19,11 @@ import {
   upsertConsent,
   hashSecret,
 } from "../../db/oauth";
+import { isAuthorizationCodeResponse, readAuthorizeParams } from "./authorize-params";
+import { shouldAcceptRedirect } from "./redirect-policy";
 import { OAuthError, oauthLog } from "./errors";
 import { newAuthorizationCode } from "./tokens";
+import { newAccountSubject } from "./account-subject";
 
 const SCOPE_LABELS: Record<string, string> = {
   "xingyu.read": "阅读博客内容、分类、空间与附件",
@@ -75,24 +78,26 @@ export async function handleAuthorize(request: Request) {
     oauthLog("oauth.redirect_uri.registered", { client_id: checked.clientId, redirect_host: hostOf(checked.redirectUri) });
   }
 
+  const subject = newAccountSubject(params.get("connection_label"), params.get("login_hint"));
   const code = newAuthorizationCode();
   await insertAuthorizationCode({
     codeHash: await hashSecret(code),
     clientId: checked.clientId,
-    subject: "xingyu-owner",
+    subject,
     redirectUri: checked.redirectUri,
     resource: checked.resource,
     scope: scopeListText(checked.scopes),
     codeChallenge: checked.codeChallenge,
   });
   await upsertConsent({
-    subject: "xingyu-owner",
+    subject,
     clientId: checked.clientId,
     resource: checked.resource,
     grantedScopes: scopeListText(checked.scopes),
   });
   oauthLog("oauth.consent.granted", {
     client_id: checked.clientId,
+    subject,
     scopes: checked.scopes,
     register_redirect: checked.registerRedirect,
   });
@@ -128,11 +133,12 @@ async function validateAuthorizeParams(origin: string, params: URLSearchParams) 
   }
 
   const registered = parseRedirectUris(client.redirectUris);
-  const registerRedirect = registered.length === 0;
-  if (!registerRedirect && !registered.includes(redirectUri)) {
+  const redirectDecision = shouldAcceptRedirect(client.clientId, registered, redirectUri);
+  if (!redirectDecision.ok) {
     oauthLog("oauth.code.rejected", { client_id: clientId, reason: "redirect_uri_mismatch", redirect_host: hostOf(redirectUri) });
     throw new OAuthError("invalid_request", 400, "redirect_uri 未登记");
   }
+  const registerRedirect = redirectDecision.register;
 
   return {
     clientId,
@@ -168,20 +174,24 @@ async function consentPage(checked: Awaited<ReturnType<typeof validateAuthorizeP
     : "";
   return new Response(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>授权 Grok 访问星屿</title>
+<title>授权访问星屿</title>
 <style>
   :root { color-scheme: light; }
   body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f5f5f7; color:#1d1d1f; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif; }
   main { width:min(520px,calc(100vw - 32px)); padding:36px 32px 28px; border-radius:28px; background:#fff; box-shadow:0 18px 50px rgba(22,28,38,.08); }
   small { color:#6e6e73; letter-spacing:.12em; font-weight:700; }
   h1 { margin:10px 0 8px; font-size:28px; letter-spacing:-.04em; }
-  p,li { color:#424245; line-height:1.6; }
+  p,li,label { color:#424245; line-height:1.6; }
   ul { padding-left:18px; }
   .note,.warn { padding:12px 14px; border-radius:14px; }
   .note { background:#f5f5f7; }
   .warn { background:#fff4e5; }
   code { font-size:12px; word-break:break-all; }
-  form { margin-top:22px; display:flex; justify-content:flex-end; gap:10px; }
+  form { margin-top:22px; display:grid; gap:16px; }
+  .field { display:grid; gap:6px; }
+  .field span { font-size:13px; font-weight:600; color:#1d1d1f; }
+  .field input { min-height:42px; padding:0 14px; border:1px solid #d2d2d7; border-radius:14px; font:inherit; }
+  .actions { display:flex; justify-content:flex-end; gap:10px; }
   button { min-height:42px; padding:0 16px; border-radius:999px; border:0; font-weight:600; }
   .deny { background:#f2f2f7; }
   .allow { color:#fff; background:#0071e3; }
@@ -195,8 +205,14 @@ async function consentPage(checked: Awaited<ReturnType<typeof validateAuthorizeP
   <form method="post" action="/oauth/authorize">
     ${hiddenInputs(checked.publicParams)}
     <input type="hidden" name="consent_token" value="${escapeHtml(token)}"/>
-    <button class="deny" name="decision" value="deny" type="submit">取消</button>
-    <button class="allow" name="decision" value="allow" type="submit">允许访问</button>
+    <label class="field">
+      <span>给这次连接起个名字</span>
+      <input name="connection_label" maxlength="40" autocomplete="off" placeholder="例如：ChatGPT 工作号"/>
+    </label>
+    <div class="actions">
+      <button class="deny" name="decision" value="deny" type="submit">取消</button>
+      <button class="allow" name="decision" value="allow" type="submit">允许访问</button>
+    </div>
   </form>
 </main></body></html>`, {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" },
@@ -240,38 +256,6 @@ async function verifyConsentToken(token: string, checked: Awaited<ReturnType<typ
   } catch {
     return false;
   }
-}
-
-async function readAuthorizeParams(request: Request, url: URL) {
-  const params = new URLSearchParams(url.searchParams);
-  if (request.method === "POST") {
-    const form = new URLSearchParams(await request.text());
-    for (const [key, value] of form) params.set(key, value);
-    const fromToken = decodeConsentPayload(form.get("consent_token") ?? "");
-    if (fromToken) {
-      if (!params.get("response_type")) params.set("response_type", "code");
-      if (!params.get("code_challenge_method")) params.set("code_challenge_method", "S256");
-      for (const key of ["client_id", "redirect_uri", "resource", "scope", "state", "code_challenge"] as const) {
-        if (!params.get(key) && fromToken[key]) params.set(key, fromToken[key]!);
-      }
-    }
-  }
-  return params;
-}
-
-function decodeConsentPayload(token: string) {
-  const dot = token.indexOf(".");
-  if (dot < 1) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(base64UrlToBytes(token.slice(0, dot)))) as Record<string, string>;
-  } catch {
-    return null;
-  }
-}
-
-function isAuthorizationCodeResponse(value: string) {
-  const types = value.split(/[\s+]+/).filter(Boolean);
-  return types.length === 1 && types[0] === "code";
 }
 
 function hiddenInputs(params: Record<string, string>) {
