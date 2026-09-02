@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 import type { AdminMcpConnection, AdminMcpSession } from "./admin-types";
 
 const SCOPE_LABELS: Record<string, string> = {

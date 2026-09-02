@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import BlogHomeExperience, { type BlogHomePost } from "../BlogHomeExperience";
-import { readApiJson } from "../api-response";
+import BlogHomeExperience, { type BlogHomePost } from "@/features/home/BlogHomeExperience";
+import { readApiJson } from "@/app/api-response";
 import type { SiteSettingsForm } from "./AdminSettingsPanel";
 import type { AdminCategory, AdminStats } from "./admin-types";
 

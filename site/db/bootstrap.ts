@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
+import { DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
 import { createPostPublicId } from "./public-id";
 
 let ready: Promise<void> | null = null;

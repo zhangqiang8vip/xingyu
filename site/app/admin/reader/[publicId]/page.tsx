@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getAdminReaderPost } from "../../../../db/queries";
 import { getAdminIdentity } from "../../../api/admin-auth";
-import PostPageView from "../../../posts/PostPageView";
+import PostPageView from "@/features/reader/PostPageView";
 
 export const dynamic="force-dynamic";
 

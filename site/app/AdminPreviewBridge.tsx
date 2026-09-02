@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import MarkdownRenderer from "./MarkdownRenderer";
+import MarkdownRenderer from "@/features/markdown/MarkdownRenderer";
 
 type PreviewKind = "home" | "about" | "connect" | "article";
 type PreviewPayload = Record<string, string | number>;

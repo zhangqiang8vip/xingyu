@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel";
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";
-import { CONTENT_LIMITS } from "../site-config";
+import { CONTENT_LIMITS } from "@/domain/site/config";
 import AdminCategoriesPanel from "./AdminCategoriesPanel";
 import AdminIntegrationsPanel from "./AdminIntegrationsPanel";
 import AdminSpacesPanel from "./AdminSpacesPanel";
@@ -15,12 +15,12 @@ import AdminSidebar from "./AdminSidebar";
 import AdminArticleEditor from "./AdminArticleEditor";
 import AdminPreviewShareDialog from "./AdminPreviewShareDialog";
 import type { AdminCategory, AdminMcpConnection, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
-import { readApiJson } from "../api-response";
-import ModalPostLink from "../ModalPostLink";
+import { readApiJson } from "@/app/api-response";
+import ModalPostLink from "@/features/reader/ModalPostLink";
 
 const emptyForm = (categoryId = 1,spaceId:number|null=null,spacePath=""): ArticleForm => ({ title: "", slug: "", excerpt: "", content: "", categoryId, spaceId,spacePath,status: "draft", featured: false, publishedAt:null });
 
-export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; userName: string; signOutPath: string }) {
+export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, initialArticle, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; initialArticle:ArticleForm|null; userName: string; signOutPath: string }) {
   const articleEditorPreviewRef=useRef<HTMLDivElement>(null);
   const [section,setSection]=useState<AdminSection>("browse");
   const [spaceLandingId,setSpaceLandingId]=useState<number|null>(null);
@@ -34,7 +34,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
   const [category, setCategory] = useState("all");
   const [status, setStatus] = useState("all");
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState<ArticleForm | null>(null);
+  const [form, setForm] = useState<ArticleForm | null>(initialArticle);
   const [message, setMessage] = useState("");
   const [stats,setStats]=useState(initialStats);
   const [studio,setStudio]=useState<null|"code"|"split"|"reading">(null);

@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import VditorEditor from "./VditorEditor";
 import type { SiteSettingsForm } from "./AdminSettingsPanel";
 import { ContentPageLivePreview } from "./AdminLivePreview";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 
 export type EditablePage = { slug:string; eyebrow:string; title:string; excerpt:string; content:string };
 

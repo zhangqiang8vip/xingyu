@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 
 export type EditableCategory={id:number;name:string;slug:string;color:string};
 export default function AdminCategoriesPanel({initial,onChange}:{initial:EditableCategory[];onChange:(items:EditableCategory[])=>void}){

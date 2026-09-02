@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type Vditor from "vditor";
 
 const slashHints = [
@@ -28,7 +28,7 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
 
   useEffect(() => { changeRef.current = onChange; }, [onChange]);
 
-  async function uploadFiles(files:File[], editor=editorRef.current) {
+  const uploadFiles=useCallback(async(files:File[], editor=editorRef.current) => {
     if (!files.length || !editor) return null;
     setUploadState("uploading");
     try {
@@ -51,7 +51,7 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
       window.setTimeout(()=>setUploadState("idle"),2600);
       return error instanceof Error?error.message:"附件上传失败";
     }
-  }
+  },[postId]);
 
   useEffect(() => {
     let disposed = false;
@@ -169,7 +169,7 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
       if (instance && ready && (instance as Vditor & { vditor?: { element?: HTMLElement } }).vditor?.element) instance.destroy();
       if (editorRef.current === instance) editorRef.current = null;
     };
-  }, [previewMode, autoFocus, attachments, postId]);
+  }, [previewMode, autoFocus, attachments, postId, uploadFiles]);
 
   return <div className={`vditor-shell${attachments?" supports-attachments":""}`}>
     {attachments&&<label className={`vditor-attachment-button ${uploadState}`}>

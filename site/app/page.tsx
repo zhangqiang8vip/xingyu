@@ -1,10 +1,10 @@
 import { getCategories, getSiteSettings, listHomePosts } from "../db/queries";
 import { type PageSearchParams } from "./content-utils";
-import NavTitleChrome from "./NavTitleChrome";
-import IslandSearch from "./IslandSearch";
+import NavTitleChrome from "@/features/navigation/NavTitleChrome";
+import IslandSearch from "@/features/navigation/IslandSearch";
 import AdminPreviewBridge from "./AdminPreviewBridge";
-import SiteNavigation from "./SiteNavigation";
-import BlogHomeExperience from "./BlogHomeExperience";
+import SiteNavigation from "@/features/navigation/SiteNavigation";
+import BlogHomeExperience from "@/features/home/BlogHomeExperience";
 
 export const dynamic = "force-dynamic";
 

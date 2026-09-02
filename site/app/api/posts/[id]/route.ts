@@ -1,19 +1,13 @@
-import { eq } from "drizzle-orm";
-import { getDb } from "../../../../db";
-import { ensureDatabase } from "../../../../db/bootstrap";
 import { getWritablePost, PostWriteError, updatePostRecord } from "../../../../db/post-write";
-import { postPreviewTokens, postSlugHistory, postViews, posts } from "../../../../db/schema";
-import { getSpacePath } from "../../../../db/spaces";
 import { isAdminRequest, unauthorized } from "../../admin-auth";
-import { parsePostPayload } from "../post-input";
+import { parsePostPayload } from "@/domain/posts/post-input";
+import { deleteAdminPost, getAdminPost } from "@/server/services/admin-posts";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAdminRequest(request))) return unauthorized();
-  await ensureDatabase(); const { id } = await params;
-  const rows = await getDb().select().from(posts).where(eq(posts.id, Number(id))).limit(1);
-  if(!rows[0])return Response.json({ error: "文章不存在" }, { status: 404 });
-  const path=rows[0].spaceId?await getSpacePath(rows[0].spaceId):[];
-  return Response.json({post:{...rows[0],spacePath:path.map((item)=>item.name).join(" / ")}});
+  const { id } = await params;
+  const post = await getAdminPost(Number(id));
+  return post ? Response.json({ post }) : Response.json({ error: "文章不存在" }, { status: 404 });
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -40,10 +34,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAdminRequest(request))) return unauthorized();
-  await ensureDatabase(); const { id } = await params;
-  await getDb().delete(postSlugHistory).where(eq(postSlugHistory.postId, Number(id)));
-  await getDb().delete(postViews).where(eq(postViews.postId, Number(id)));
-  await getDb().delete(postPreviewTokens).where(eq(postPreviewTokens.postId, Number(id)));
-  await getDb().delete(posts).where(eq(posts.id, Number(id)));
+  const { id } = await params;
+  await deleteAdminPost(Number(id));
   return Response.json({ ok: true });
 }

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CursorPost } from "../../db/queries";
-import ModalPostLink from "../ModalPostLink";
-import { CONTENT_LIMITS } from "../site-config";
+import ModalPostLink from "@/features/reader/ModalPostLink";
+import { CONTENT_LIMITS } from "@/domain/site/config";
 import { formatLongDate, formatMonthDay } from "../content-utils";
 
 type Props = {

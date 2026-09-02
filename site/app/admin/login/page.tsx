@@ -4,7 +4,7 @@ import { getAdminIdentity, isPasswordLoginConfigured } from "../../api/admin-aut
 import AdminLoginForm from "./AdminLoginForm";
 import { safeOAuthReturnTo } from "../../../worker/oauth/authorize";
 import { getSiteSettings } from "../../../db/queries";
-import ThemeToggle from "../../ThemeToggle";
+import ThemeToggle from "@/features/navigation/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 

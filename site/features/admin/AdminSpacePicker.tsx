@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 
 export type SpaceChoice={id:number;name:string;path?:Array<{id:number;name:string}>};
 type SpaceNode={id:number;parentId:number|null;name:string;slug:string;childCount:number;articleCount:number;path?:Array<{id:number;name:string}>};

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import VditorEditor from "./VditorEditor";
-import { formatLongDate } from "../content-utils";
+import { formatLongDate } from "@/app/content-utils";
 
 type Mode="code"|"split"|"reading";
 export type ArticleDraft={id?:number;publicId?:string;title:string;slug?:string;excerpt:string;content:string;publishedAt?:string|null;status?:"draft"|"published";spaceId?:number|null;spacePath?:string};

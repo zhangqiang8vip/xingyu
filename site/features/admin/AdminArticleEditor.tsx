@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, type RefObject, useState } from "react";
-import { postPath } from "../post-path";
+import { postPath } from "@/app/post-path";
 import type { SiteSettingsForm } from "./AdminSettingsPanel";
 import AdminSpacePicker from "./AdminSpacePicker";
 import { ArticleFrontstage } from "./ArticleWritingStudio";

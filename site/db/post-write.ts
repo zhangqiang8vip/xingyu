@@ -3,7 +3,7 @@ import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { createPostPublicId } from "./public-id";
 import { postSlugHistory, posts, spaces } from "./schema";
-import type { PostPayload } from "../app/api/posts/post-input";
+import type { PostPayload } from "@/domain/posts/post-input";
 import { bindMarkdownAttachments } from "./attachments";
 
 const MAX_TITLE_LENGTH = 200;

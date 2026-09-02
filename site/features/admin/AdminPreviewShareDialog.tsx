@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { readApiJson } from "../api-response";
+import { useEffect, useState } from "react";
+import { readApiJson } from "@/app/api-response";
 
 type PreviewLink={id:number;expiresAt:number;createdAt:string;revokedAt:string|null;lastViewedAt:string|null;viewCount:number;active:boolean};
 
@@ -13,15 +13,21 @@ export default function AdminPreviewShareDialog({post,onClose}:{post:{id:number;
   const [loading,setLoading]=useState(true);
   const [working,setWorking]=useState(false);
 
-  const load=useCallback(async()=>{
-    setLoading(true);
-    const response=await fetch(`/api/posts/${post.id}/preview-links`,{cache:"no-store"});
-    const data=await readApiJson<{links:PreviewLink[]}>(response);
-    if(response.ok)setLinks(data.links??[]);else setMessage(data.error??"读取预览链接失败");
-    setLoading(false);
+  useEffect(()=>{
+    const controller=new AbortController();
+    void (async()=>{
+      const response=await fetch(`/api/posts/${post.id}/preview-links`,{cache:"no-store",signal:controller.signal});
+      const data=await readApiJson<{links:PreviewLink[]}>(response);
+      if(controller.signal.aborted)return;
+      if(response.ok)setLinks(data.links??[]);else setMessage(data.error??"读取预览链接失败");
+      setLoading(false);
+    })().catch((error:unknown)=>{
+      if(controller.signal.aborted)return;
+      setMessage(error instanceof Error?error.message:"读取预览链接失败");
+      setLoading(false);
+    });
+    return()=>controller.abort();
   },[post.id]);
-
-  useEffect(()=>{void load()},[load]);
   useEffect(()=>{
     const close=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose()};
     window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);

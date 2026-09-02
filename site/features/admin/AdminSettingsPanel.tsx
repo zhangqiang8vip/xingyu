@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { HomeLivePreview } from "./AdminLivePreview";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 
 export type SiteSettingsForm = {
   brandName:string; brandLatin:string; authorName:string; avatarUrl:string; tagline:string; description:string;

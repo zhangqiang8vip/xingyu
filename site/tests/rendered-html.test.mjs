@@ -67,8 +67,8 @@ test("article routes use stable public ids and retain historical slugs", async (
 
 test("public pages consume editable settings and shared presentation helpers", async () => {
   const [home, homeExperience, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
-    source("app/page.tsx"), source("app/BlogHomeExperience.tsx"), source("app/about/page.tsx"), source("app/posts/PostPageView.tsx"),
-    source("app/layout.tsx"), source("app/admin/AdminClient.tsx"), source("app/SiteNavigation.tsx"),
+    source("app/page.tsx"), source("features/home/BlogHomeExperience.tsx"), source("app/about/page.tsx"), source("features/reader/PostPageView.tsx"),
+    source("app/layout.tsx"), source("features/admin/AdminClient.tsx"), source("features/navigation/SiteNavigation.tsx"),
     source("app/content-utils.ts"),
   ]);
   assert.match(home, /getSiteSettings/);
@@ -95,11 +95,11 @@ test("public pages consume editable settings and shared presentation helpers", a
 
 test("public island navigation keeps desktop and phone trees apart", async () => {
   const [navigation, desktop, mobile, tools, destinations, css] = await Promise.all([
-    source("app/SiteNavigation.tsx"),
-    source("app/nav/DesktopIslandNav.tsx"),
-    source("app/nav/MobileIslandMenu.tsx"),
-    source("app/nav/NavTools.tsx"),
-    source("app/nav/nav-destinations.ts"),
+    source("features/navigation/SiteNavigation.tsx"),
+    source("features/navigation/nav/DesktopIslandNav.tsx"),
+    source("features/navigation/nav/MobileIslandMenu.tsx"),
+    source("features/navigation/nav/NavTools.tsx"),
+    source("features/navigation/nav/nav-destinations.ts"),
     source("app/globals.css"),
   ]);
   assert.match(navigation, /<DesktopIslandNav/);
@@ -145,21 +145,43 @@ test("remote MCP separates read approvals from important writes and records rece
 test("editor assets and post parsing stay scoped to their owners", async () => {
   const [rootLayout, adminLayout, postRoute, postInput, categoriesRoute, editor, transitions] = await Promise.all([
     source("app/layout.tsx"), source("app/admin/layout.tsx"), source("app/api/posts/route.ts"),
-    source("app/api/posts/post-input.ts"), source("app/api/categories/route.ts"),
-    source("app/admin/VditorEditor.tsx"), source("app/RouteTransition.tsx"),
+    source("domain/posts/post-input.ts"), source("server/services/categories.ts"),
+    source("features/admin/VditorEditor.tsx"), source("app/RouteTransition.tsx"),
   ]);
   assert.doesNotMatch(rootLayout, /vditor\/index\.css/);
   assert.match(adminLayout, /\/vditor\/dist\/index\.css/);
   assert.doesNotMatch(adminLayout, /import "vditor\/dist/);
   assert.match(postRoute, /parsePostPayload/);
   assert.match(postInput, /export function slugify/);
-  assert.match(categoriesRoute, /posts\/post-input/);
+  assert.match(categoriesRoute, /domain\/posts\/post-input/);
   assert.match(editor, /await import\("vditor"\)/);
   assert.match(transitions, /const HTMLFlipBook = lazy\(loadFlipBook\)/);
 });
 
+test("admin write routes delegate business rules to server services", async () => {
+  const [postRoute, categoryRoute, categoryItemRoute, settingsRoute, pageRoute, postService, categoryService, siteService] = await Promise.all([
+    source("app/api/posts/[id]/route.ts"), source("app/api/categories/route.ts"),
+    source("app/api/categories/[id]/route.ts"), source("app/api/settings/route.ts"),
+    source("app/api/pages/[slug]/route.ts"), source("server/services/admin-posts.ts"),
+    source("server/services/categories.ts"), source("server/services/site-content.ts"),
+  ]);
+  assert.match(postRoute, /getAdminPost/);
+  assert.match(postRoute, /deleteAdminPost/);
+  assert.match(categoryRoute, /createCategory/);
+  assert.match(categoryItemRoute, /updateCategory/);
+  assert.match(categoryItemRoute, /deleteCategory/);
+  assert.match(settingsRoute, /updateSiteSettings/);
+  assert.match(pageRoute, /upsertContentPage/);
+  for (const route of [postRoute, categoryRoute, categoryItemRoute, settingsRoute, pageRoute]) {
+    assert.doesNotMatch(route, /drizzle-orm|from\([a-zA-Z]+\)|\.insert\(|\.update\(|\.delete\(/);
+  }
+  assert.match(postService, /postSlugHistory/);
+  assert.match(categoryService, /CategoryServiceError/);
+  assert.match(siteService, /CONTENT_LIMITS/);
+});
+
 test("admin search cancels stale work and avoids refetching stable stats", async () => {
-  const admin = await source("app/admin/AdminClient.tsx");
+  const admin = await source("features/admin/AdminClient.tsx");
   assert.match(admin, /const controller = new AbortController\(\)/);
   assert.match(admin, /load\(controller\.signal\)/);
   assert.match(admin, /const loadStats = useCallback/);
@@ -168,12 +190,12 @@ test("admin search cancels stale work and avoids refetching stable stats", async
 
 test("admin previews unsaved content through the real public pages", async () => {
   const [admin, sidebar, articles, articleEditor, homeSettings, aboutEditor, studio, previewEntry, vditor, livePreview, bridge, postPage] = await Promise.all([
-    source("app/admin/AdminClient.tsx"), source("app/admin/AdminSidebar.tsx"),
-    source("app/admin/AdminArticlesPanel.tsx"), source("app/admin/AdminArticleEditor.tsx"),
-    source("app/admin/AdminSettingsPanel.tsx"),
-    source("app/admin/AdminPageEditor.tsx"), source("app/admin/ArticleWritingStudio.tsx"),
-    source("app/admin/article-preview/page.tsx"), source("app/admin/VditorEditor.tsx"), source("app/admin/AdminLivePreview.tsx"),
-    source("app/AdminPreviewBridge.tsx"), source("app/posts/PostPageView.tsx"),
+    source("features/admin/AdminClient.tsx"), source("features/admin/AdminSidebar.tsx"),
+    source("features/admin/AdminArticlesPanel.tsx"), source("features/admin/AdminArticleEditor.tsx"),
+    source("features/admin/AdminSettingsPanel.tsx"),
+    source("features/admin/AdminPageEditor.tsx"), source("features/admin/ArticleWritingStudio.tsx"),
+    source("app/admin/article-preview/page.tsx"), source("features/admin/VditorEditor.tsx"), source("features/admin/AdminLivePreview.tsx"),
+    source("app/AdminPreviewBridge.tsx"), source("features/reader/PostPageView.tsx"),
   ]);
   assert.ok(sidebar.indexOf('label: "浏览"') < sidebar.indexOf('label: "文章"'));
   assert.ok(sidebar.indexOf('label: "文章"') < sidebar.indexOf('label: "知识空间"'));
@@ -217,8 +239,8 @@ test("admin previews unsaved content through the real public pages", async () =>
 
 test("Markdown Plus is rendered through one safe, shared pipeline", async () => {
   const [renderer, mermaid, post, modal, bridge, packageJson] = await Promise.all([
-    source("app/MarkdownRenderer.tsx"), source("app/MarkdownMermaid.tsx"),
-    source("app/posts/PostPageView.tsx"), source("app/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
+    source("features/markdown/MarkdownRenderer.tsx"), source("features/markdown/MarkdownMermaid.tsx"),
+    source("features/reader/PostPageView.tsx"), source("features/reader/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
     source("package.json"),
   ]);
   assert.match(renderer, /remarkMath/);
@@ -237,7 +259,7 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
 
 test("admin and markdown editor share the site theme palette", async () => {
   const [styles,editor,toggle]=await Promise.all([
-    source("app/globals.css"),source("app/admin/VditorEditor.tsx"),source("app/ThemeToggle.tsx"),
+    source("app/globals.css"),source("features/admin/VditorEditor.tsx"),source("features/navigation/ThemeToggle.tsx"),
   ]);
   assert.match(styles,/--admin-canvas:/);
   assert.match(styles,/--admin-panel:/);
@@ -258,10 +280,10 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
     admin, articleEditor, sidebar, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute,
   ] = await Promise.all([
     source("db/schema.ts"), source("db/bootstrap.ts"), generatedMigration(),
-    source("db/queries.ts"), source("db/spaces.ts"), source("app/api/posts/post-input.ts"),
-    source("db/post-write.ts"), source("app/admin/AdminClient.tsx"), source("app/admin/AdminArticleEditor.tsx"),
-    source("app/admin/AdminSidebar.tsx"),
-    source("app/admin/AdminSpacesPanel.tsx"), source("app/admin/AdminSpacePicker.tsx"),
+    source("db/queries.ts"), source("db/spaces.ts"), source("domain/posts/post-input.ts"),
+    source("db/post-write.ts"), source("features/admin/AdminClient.tsx"), source("features/admin/AdminArticleEditor.tsx"),
+    source("features/admin/AdminSidebar.tsx"),
+    source("features/admin/AdminSpacesPanel.tsx"), source("features/admin/AdminSpacePicker.tsx"),
     source("app/api/posts/route.ts"), source("app/api/posts/[id]/route.ts"),
     source("app/api/views/[slug]/route.ts"),
   ]);
@@ -324,15 +346,15 @@ test("knowledge-space APIs and MCP expose scoped search with auditable writes", 
 
 test("admin global search covers every article through the shared authenticated reader", async () => {
   const [admin, search, postsApi, modal, browse, homeExperience, readerApi, readerPage, postView] = await Promise.all([
-    source("app/admin/AdminClient.tsx"),
-    source("app/admin/AdminArticleSearch.tsx"),
+    source("features/admin/AdminClient.tsx"),
+    source("features/admin/AdminArticleSearch.tsx"),
     source("app/api/posts/route.ts"),
-    source("app/ModalPostLink.tsx"),
-    source("app/admin/AdminBrowsePanel.tsx"),
-    source("app/BlogHomeExperience.tsx"),
+    source("features/reader/ModalPostLink.tsx"),
+    source("features/admin/AdminBrowsePanel.tsx"),
+    source("features/home/BlogHomeExperience.tsx"),
     source("app/api/reader/[slug]/route.ts"),
     source("app/admin/reader/[publicId]/page.tsx"),
-    source("app/posts/PostPageView.tsx"),
+    source("features/reader/PostPageView.tsx"),
   ]);
   assert.match(search,/scope:"all"/);
   assert.match(search,/metaKey\|\|event\.ctrlKey/);
@@ -348,6 +370,9 @@ test("admin global search covers every article through the shared authenticated 
   assert.match(homeExperience,/readerScope=\{admin\?"admin":"public"\}/);
   assert.match(modal,/scope=admin/);
   assert.match(modal,/xingyu:admin-reader-open/);
+  assert.match(modal,/管理阅读/);
+  assert.match(modal,/独立阅读/);
+  assert.match(modal,/event\.key\.toLocaleLowerCase\(\) === "e"/);
   assert.match(readerApi,/isAdminRequest/);
   assert.match(readerApi,/getAdminReaderPost/);
   assert.match(readerPage,/getAdminIdentity/);
@@ -363,8 +388,8 @@ test("attachments inherit article visibility and are available to editors and MC
     source("db/attachments.ts"),
     source("app/api/attachments/route.ts"),
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
-    source("app/MarkdownRenderer.tsx"),
-    source("app/admin/VditorEditor.tsx"),
+    source("features/markdown/MarkdownRenderer.tsx"),
+    source("features/admin/VditorEditor.tsx"),
     mcpSource(),
   ]);
   assert.match(schema, /attachments = sqliteTable\("attachments"/);
@@ -387,12 +412,12 @@ test("private article preview links are scoped, expiring and revocable", async (
     source("db/post-preview-tokens.ts"),
     source("app/api/posts/[id]/preview-links/route.ts"),
     source("app/preview/[token]/page.tsx"),
-    source("app/posts/PostPageView.tsx"),
-    source("app/MarkdownRenderer.tsx"),
+    source("features/reader/PostPageView.tsx"),
+    source("features/markdown/MarkdownRenderer.tsx"),
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
-    source("app/admin/AdminClient.tsx"),
-    source("app/admin/AdminArticlesPanel.tsx"),
-    source("app/admin/AdminSpacesPanel.tsx"),
+    source("features/admin/AdminClient.tsx"),
+    source("features/admin/AdminArticlesPanel.tsx"),
+    source("features/admin/AdminSpacesPanel.tsx"),
   ]);
   assert.match(schema,/postPreviewTokens = sqliteTable\("post_preview_tokens"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS post_preview_tokens/);

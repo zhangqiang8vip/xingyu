@@ -109,7 +109,7 @@ site/
 
 ### 唯一渲染链路
 
-所有公开文章、弹窗阅读、后台真实预览、草稿预览都必须使用 `app/MarkdownRenderer.tsx`。
+所有公开文章、弹窗阅读、后台真实预览、草稿预览都必须使用 `features/markdown/MarkdownRenderer.tsx`。
 
 支持内容包括：
 

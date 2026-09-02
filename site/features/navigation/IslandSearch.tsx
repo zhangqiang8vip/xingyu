@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
-import { transitionTo } from "./RouteTransition";
-import { CONTENT_LIMITS } from "./site-config";
-import { formatShortDate, isEditableTarget } from "./content-utils";
-import { postPath } from "./post-path";
+import { transitionTo } from "@/app/RouteTransition";
+import { CONTENT_LIMITS } from "@/domain/site/config";
+import { formatShortDate, isEditableTarget } from "@/app/content-utils";
+import { postPath } from "@/app/post-path";
 
 export type SearchPost = { id:number; publicId:string; title:string; slug:string; excerpt:string; publishedAt:string | null; viewCount:number; categoryName:string | null; categoryColor:string | null; status?:"draft"|"published";spaceId?:number|null;spacePath?:string|null };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 import AdminSpacePicker, { type SpaceChoice } from "./AdminSpacePicker";
 
 type SpaceNode={id:number;parentId:number|null;name:string;slug:string;sortOrder:number;childCount:number;articleCount:number;totalArticleCount?:number;latestActivityAt?:string;childPreview?:string|null;updatedAt:string;path?:PathNode[]};

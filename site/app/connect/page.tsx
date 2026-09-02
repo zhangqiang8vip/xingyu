@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { getContentPage, getSiteSettings } from "../../db/queries";
 import type { PageSearchParams } from "../content-utils";
-import { copyrightText } from "../site-config";
-import NavTitleChrome from "../NavTitleChrome";
-import IslandSearch from "../IslandSearch";
+import { copyrightText } from "@/domain/site/config";
+import NavTitleChrome from "@/features/navigation/NavTitleChrome";
+import IslandSearch from "@/features/navigation/IslandSearch";
 import AdminPreviewBridge from "../AdminPreviewBridge";
-import SiteNavigation from "../SiteNavigation";
-import MarkdownRenderer from "../MarkdownRenderer";
+import SiteNavigation from "@/features/navigation/SiteNavigation";
+import MarkdownRenderer from "@/features/markdown/MarkdownRenderer";
 
 export const dynamic = "force-dynamic";
 

@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import ArticleEndMark from "./ArticleEndMark";
-import IslandSearch from "./IslandSearch";
-import { formatLongDate, isEditableTarget } from "./content-utils";
-import { postPath } from "./post-path";
-import MarkdownRenderer from "./MarkdownRenderer";
+import IslandSearch from "@/features/navigation/IslandSearch";
+import { formatLongDate, isEditableTarget } from "@/app/content-utils";
+import { postPath } from "@/app/post-path";
+import MarkdownRenderer from "@/features/markdown/MarkdownRenderer";
 
 type ReaderPost = {
   id: number;
@@ -285,6 +286,12 @@ export default function ModalPostLink({ publicId, slug, readerScope="public", co
     setActivePublicId(neighbor.publicId);
   }, [resetReaderState]);
 
+  const editPost = useCallback(() => {
+    if (!post || !onEdit) return;
+    setOpen(false);
+    onEdit(post.id);
+  }, [onEdit, post]);
+
   useEffect(() => {
     if (!open) return;
     const handleKeyboard = (event: KeyboardEvent) => {
@@ -295,11 +302,14 @@ export default function ModalPostLink({ publicId, slug, readerScope="public", co
       } else if (event.key === "ArrowRight" && nextPost) {
         event.preventDefault();
         switchPost(nextPost);
+      } else if (event.key.toLocaleLowerCase() === "e" && readerScope === "admin" && post && onEdit) {
+        event.preventDefault();
+        editPost();
       }
     };
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
-  }, [nextPost, open, previousPost, switchPost]);
+  }, [editPost, nextPost, onEdit, open, post, previousPost, readerScope, switchPost]);
 
   const beginQuickLongPress = (event: React.PointerEvent, direction: "previous" | "next") => {
     if (event.pointerType === "mouse") return;
@@ -353,11 +363,11 @@ export default function ModalPostLink({ publicId, slug, readerScope="public", co
     {open && <div className="reader-modal" role="dialog" aria-modal="true" aria-label={post?.title ?? "正在打开文章"} onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <div className="reader-layout" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
        <section className="reader-panel">
-        <header className="reader-toolbar">
-          <div><i /><span>沉浸阅读</span></div>
+        <header className={`reader-toolbar${readerScope==="admin"?" admin-reader-toolbar":""}`}>
+          <div><i /><span>{readerScope==="admin"?"管理阅读":"沉浸阅读"}</span>{readerScope==="admin"&&post&&<b>{post.spaceId?"知识空间":post.status==="draft"?"公开草稿":"已发布"}</b>}</div>
           {post && <button className="reader-toolbar-title" type="button" onClick={returnToTop} aria-label={`${post.title}，已阅读 ${Math.round(readingProgress * 100)}%，返回文章顶部`} title="返回文章顶部"><span>{post.title}</span><i>↑</i><b>{Math.round(readingProgress * 100)}%</b></button>}
           {post && <IslandSearch variant="reader" scope={readerScope} initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); setActivePublicId(result.publicId); }} />}
-          {post&&readerScope==="admin"&&onEdit&&<button className="reader-toolbar-edit" type="button" onClick={()=>{setOpen(false);onEdit(post.id)}}>编辑</button>}
+          {post&&readerScope==="admin"&&onEdit&&<button className="reader-toolbar-edit" type="button" onClick={editPost} title="编辑文章（E）">编辑</button>}
           <button className="reader-toolbar-close" type="button" onClick={() => setOpen(false)} autoFocus aria-label="关闭阅读弹窗">×</button>
           <span className="reader-toolbar-progress" style={{ "--reader-progress": readingProgress } as React.CSSProperties} aria-hidden="true" />
         </header>
@@ -370,7 +380,7 @@ export default function ModalPostLink({ publicId, slug, readerScope="public", co
         {post && <>
           {tocItems.length > 0 && <button className={`reader-toc-toggle ${tocVisible ? "visible" : ""}`} type="button" onClick={() => setTocOpen((value) => !value)} aria-label="打开文章目录" aria-expanded={tocOpen}>目录</button>}
           <div className="reader-scroll" ref={scrollRef}>
-            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{readerScope==="admin"?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span>{readerScope==="admin"&&<><i/><span>{post.spaceId?"私有知识":post.status==="draft"?"草稿":"公开文章"}</span></>}</div></header>
+            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{readerScope==="admin"?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span>{readerScope==="admin"&&<><i/><span>{post.spaceId?"私有知识":post.status==="draft"?"草稿":"公开文章"}</span></>}</div>{readerScope==="admin"&&<aside className="reader-admin-context"><span><i/>{post.spaceId?"仅管理员与 MCP 可见":post.status==="draft"?"尚未公开发布":"公开博客可见"}</span><b>{post.spaceId?(post.spacePath||"知识空间"):post.categoryName||"无分类"}</b><Link href={`/admin/reader/${encodeURIComponent(post.publicId)}`}>独立阅读 ↗</Link>{onEdit&&<button type="button" onClick={editPost}>编辑此文 <kbd>E</kbd></button>}</aside>}</header>
             <article className="reader-prose markdown-body" ref={articleRef}><MarkdownRenderer>{post.content}</MarkdownRenderer><ArticleEndMark /></article>
             <section className="reader-neighbors" aria-label="上一篇和下一篇">
               <header><small>KEEP READING</small><h2>继续阅读</h2></header>

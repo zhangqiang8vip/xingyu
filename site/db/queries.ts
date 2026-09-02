@@ -4,7 +4,7 @@ import { cache } from "react";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
-import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "../app/site-config";
+import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
 
 export type PostFilters = {
   page?: number;

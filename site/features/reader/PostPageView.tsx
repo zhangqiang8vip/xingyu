@@ -1,17 +1,17 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { getNextAdminPost, getNextPublishedPost, getPreviousAdminPost, getPreviousPublishedPost, getSiteSettings, type AdminReaderPost, type getPostByPublicId } from "../../db/queries";
-import SiteNavigation from "../SiteNavigation";
-import IslandSearch from "../IslandSearch";
-import AdminPreviewBridge from "../AdminPreviewBridge";
-import ArticleEndMark from "../ArticleEndMark";
-import ModalPostLink from "../ModalPostLink";
-import { formatLongDate } from "../content-utils";
-import PostReadingChrome from "./[slug]/PostReadingChrome";
-import PostTableOfContents from "./[slug]/PostTableOfContents";
-import PostSideNavigation from "./[slug]/PostSideNavigation";
-import PostViewTracker from "./[slug]/PostViewTracker";
-import MarkdownRenderer from "../MarkdownRenderer";
+import { getNextAdminPost, getNextPublishedPost, getPreviousAdminPost, getPreviousPublishedPost, getSiteSettings, type AdminReaderPost, type getPostByPublicId } from "@/db/queries";
+import SiteNavigation from "@/features/navigation/SiteNavigation";
+import IslandSearch from "@/features/navigation/IslandSearch";
+import AdminPreviewBridge from "@/app/AdminPreviewBridge";
+import ArticleEndMark from "./ArticleEndMark";
+import ModalPostLink from "./ModalPostLink";
+import { formatLongDate } from "@/app/content-utils";
+import PostReadingChrome from "./PostReadingChrome";
+import PostTableOfContents from "./PostTableOfContents";
+import PostSideNavigation from "./PostSideNavigation";
+import PostViewTracker from "./PostViewTracker";
+import MarkdownRenderer from "@/features/markdown/MarkdownRenderer";
 
 type PublicPost = NonNullable<Awaited<ReturnType<typeof getPostByPublicId>>>;
 type ReadablePost=PublicPost|AdminReaderPost;
@@ -28,7 +28,7 @@ export default async function PostPageView({ post, adminPreview = false, readerS
   return <main className="post-page">
     {!adminPreview&&!admin&&!sharedPreview&&<PostViewTracker publicId={post.publicId}/>}
     <SiteNavigation brandName={settings.brandName} current="archive"><PostReadingChrome title={post.title} category={post.categoryName} color={post.categoryColor}/>{!sharedPreview&&<IslandSearch scope={admin?"admin":"public"} initialText={post.title} excludeSlug={post.slug}/>}</SiteNavigation>
-    {admin&&<Link className="admin-reader-return" href="/admin">← 返回管理端</Link>}
+    {admin&&<nav className="admin-reader-return" aria-label="管理阅读操作"><Link href="/admin">← 返回管理端</Link><Link href={`/admin?edit=${post.id}`}>编辑文章 ↗</Link></nav>}
     {sharedPreview&&<div className="shared-preview-notice"><i/><b>受邀预览</b><span>只读 · 仅当前文章</span>{previewExpiresAt&&<time>有效至 {new Date(previewExpiresAt*1000).toLocaleString("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</time>}</div>}
     <header className="post-hero">
       <span className="post-category" data-preview-field="categoryName" data-preview-color="categoryColor" style={{color:post.categoryColor??undefined}}>{sharedPreview?`受邀预览 · ${"spacePath" in post&&post.spacePath?post.spacePath:"status" in post&&post.status==="draft"?"草稿":post.categoryName}`:admin&&"spaceId" in post&&post.spaceId?(post.spacePath||"知识空间"):admin&&"status" in post&&post.status==="draft"?"公开草稿":post.categoryName}</span>

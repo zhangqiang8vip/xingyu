@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import IslandSearch from "../IslandSearch";
+import IslandSearch from "@/features/navigation/IslandSearch";
 import StableLink from "../StableLink";
 
 type Category = { id: number; name: string; slug: string; color: string };

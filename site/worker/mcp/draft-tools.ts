@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { slugify, type PostPayload } from "../../app/api/posts/post-input";
+import { slugify, type PostPayload } from "@/domain/posts/post-input";
 import { createPostRecord, updatePostRecord } from "../../db/post-write";
 import { getSpacePath, resolveSpace } from "../../db/spaces";
 import {

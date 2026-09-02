@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readApiJson } from "../api-response";
+import { readApiJson } from "@/app/api-response";
 
 export type AdminSearchPost = {
   id:number;

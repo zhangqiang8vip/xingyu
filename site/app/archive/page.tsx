@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { getCategories, getSiteSettings, listArchivePosts } from "../../db/queries";
 import type { PageSearchParams } from "../content-utils";
-import { CONTENT_LIMITS, copyrightText } from "../site-config";
+import { CONTENT_LIMITS, copyrightText } from "@/domain/site/config";
 import StableLink from "../StableLink";
 import ArchiveExplorer from "./ArchiveExplorer";
-import SiteNavigation from "../SiteNavigation";
+import SiteNavigation from "@/features/navigation/SiteNavigation";
 import ArchiveNavCenter from "./ArchiveNavCenter";
 
 export const dynamic = "force-dynamic";

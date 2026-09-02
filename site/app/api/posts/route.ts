@@ -1,7 +1,7 @@
 import { listAdminPosts } from "../../../db/queries";
 import { createPostRecord, PostWriteError } from "../../../db/post-write";
 import { isAdminRequest, unauthorized } from "../admin-auth";
-import { parsePostPayload } from "./post-input";
+import { parsePostPayload } from "@/domain/posts/post-input";
 
 export async function GET(request: Request) {
   if (!(await isAdminRequest(request))) return unauthorized();

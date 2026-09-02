@@ -1,5 +1,5 @@
 import { listArchivePosts } from "../../../db/queries";
-import { CONTENT_LIMITS } from "../../site-config";
+import { CONTENT_LIMITS } from "@/domain/site/config";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

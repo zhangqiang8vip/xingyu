@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { formatLongDate, isEditableTarget } from "../../content-utils";
-import ModalPostLink from "../../ModalPostLink";
-import { postPath } from "../../post-path";
+import { formatLongDate, isEditableTarget } from "@/app/content-utils";
+import ModalPostLink from "./ModalPostLink";
+import { postPath } from "@/app/post-path";
 
 type NeighborPost = {
   publicId: string;

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { estimateReadingMinutes, formatLongDate } from "./content-utils";
-import ModalPostLink from "./ModalPostLink";
-import StableLink from "./StableLink";
-import { copyrightText } from "./site-config";
+import { estimateReadingMinutes, formatLongDate } from "@/app/content-utils";
+import ModalPostLink from "@/features/reader/ModalPostLink";
+import StableLink from "@/app/StableLink";
+import { copyrightText } from "@/domain/site/config";
 
 export type BlogCategory={id:number;name:string;slug:string;color:string};
 export type BlogHomePost={
