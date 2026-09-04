@@ -62,7 +62,8 @@ export async function listHomePosts(category = "all", requestedLimit: number = C
   const conditions = [eq(posts.status, "published"),isNull(posts.spaceId)];
   if (category !== "all") conditions.push(eq(categories.slug, category));
   return getDb().select({
-    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt, content: posts.content,
+    id: posts.id, publicId: posts.publicId, title: posts.title, slug: posts.slug, excerpt: posts.excerpt,
+    contentLength: sql<number>`length(${posts.content})`,
     status: posts.status, featured: posts.featured, viewCount: posts.viewCount,
     publishedAt: posts.publishedAt, updatedAt: posts.updatedAt,
     categoryId: posts.categoryId, categoryName: categories.name,

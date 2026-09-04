@@ -1,5 +1,7 @@
 "use client";
 
+import "@/app/admin/admin.css";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSettingsPanel, { type SiteSettingsForm } from "./AdminSettingsPanel";
 import AdminPageEditor, { type EditablePage } from "./AdminPageEditor";

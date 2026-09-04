@@ -14,7 +14,7 @@ type Props = {
 export default function SiteNavigation({ brandName, children, current }: Props) {
   return <header className="site-nav">
     <nav>
-      <Link className="brand" href="/" aria-label={`${brandName}首页`}>
+      <Link className="brand" href="/" prefetch={false} aria-label={`${brandName}首页`}>
         <span className="brand-word" data-preview-field="brandName">{brandName}</span>
         <span className="brand-orbit" aria-hidden="true"><i /></span>
       </Link>

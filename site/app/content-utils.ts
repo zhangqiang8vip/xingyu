@@ -38,6 +38,17 @@ export function estimateReadingMinutes(markdown: string) {
   return Math.max(1, Math.ceil(text.length / 350));
 }
 
+export function estimateReadingMinutesFromLength(length: number) {
+  return Math.max(1, Math.ceil(Math.max(0, length) / 350));
+}
+
+export function avatarSource(url: string, renderedSize: "small" | "portrait") {
+  if (url !== "/images/xingyu-avatar.jpg") return url;
+  return renderedSize === "small"
+    ? "/images/xingyu-avatar-64.webp"
+    : "/images/xingyu-avatar-192.webp";
+}
+
 export function isEditableTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }

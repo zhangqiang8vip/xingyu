@@ -127,7 +127,7 @@ export default function IslandSearch({ initialText, excludeSlug, onSelect, varia
           <footer><span>↑↓ 选择</span><span>Enter 打开</span></footer>
         </div>
         {hovered && <button className="island-search-preview" type="button" onClick={() => openPost(hovered)} style={{ "--search-color":hovered.categoryColor ?? "#0071e3" } as CSSProperties}>
-          <small><i />{hovered.categoryName ?? "文章预览"}</small><b>{hovered.title}</b><p>{hovered.excerpt}</p><footer><time>{formatShortDate(hovered.publishedAt)}</time><span>{hovered.viewCount.toLocaleString()} 阅读</span></footer><em>打开文章 ↗</em>
+          <small><i />{hovered.categoryName ?? "文章预览"}</small><b>{hovered.title}</b><p>{hovered.excerpt}</p><footer><time>{formatShortDate(hovered.publishedAt)}</time><span>{hovered.viewCount.toLocaleString("zh-CN")} 阅读</span></footer><em>打开文章 ↗</em>
         </button>}
       </div>
     </>}

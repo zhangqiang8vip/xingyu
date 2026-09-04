@@ -5,6 +5,7 @@ import AdminLoginForm from "./AdminLoginForm";
 import { safeOAuthReturnTo } from "../../../worker/oauth/authorize";
 import { getSiteSettings } from "../../../db/queries";
 import ThemeToggle from "@/features/navigation/ThemeToggle";
+import "./login.css";
 
 export const dynamic = "force-dynamic";
 

@@ -15,9 +15,21 @@
       "database_id": "3d1f4b08-a1f8-4ba3-a876-2ba4b3a10b16"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "xingyu-production-media"
+    }
+  ],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist/client"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "cache": {
+    "enabled": true
   },
   "routes": [
     {

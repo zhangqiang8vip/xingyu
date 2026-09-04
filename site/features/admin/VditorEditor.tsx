@@ -1,5 +1,6 @@
 "use client";
 
+import "vditor/dist/index.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Vditor from "vditor";
 

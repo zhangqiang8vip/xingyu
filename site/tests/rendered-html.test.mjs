@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import test from "node:test";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const clientManifest = async () => JSON.parse(await source("dist/client/.vite/manifest.json"));
 const mcpSource = async () => (await Promise.all([
   source("worker/blog-mcp.ts"),
   source("worker/mcp/read-tools.ts"),
@@ -66,15 +67,18 @@ test("article routes use stable public ids and retain historical slugs", async (
 });
 
 test("public pages consume editable settings and shared presentation helpers", async () => {
-  const [home, homeExperience, about, post, layout, admin, navigation, contentUtils] = await Promise.all([
+  const [home, homeExperience, about, post, layout, admin, navigation, contentUtils, queries] = await Promise.all([
     source("app/page.tsx"), source("features/home/BlogHomeExperience.tsx"), source("app/about/page.tsx"), source("features/reader/PostPageView.tsx"),
     source("app/layout.tsx"), source("features/admin/AdminClient.tsx"), source("features/navigation/SiteNavigation.tsx"),
-    source("app/content-utils.ts"),
+    source("app/content-utils.ts"), source("db/queries.ts"),
   ]);
   assert.match(home, /getSiteSettings/);
   assert.match(home, /settings\.homePostLimit/);
   assert.match(home, /<BlogHomeExperience/);
-  assert.match(homeExperience, /estimateReadingMinutes\(post\.content\)/);
+  assert.match(homeExperience, /estimateReadingMinutesFromLength\(post\.contentLength\)/);
+  const homeQuery=queries.slice(queries.indexOf("export async function listHomePosts"),queries.indexOf("export const getSiteSettings"));
+  assert.match(homeQuery, /contentLength:\s*sql<number>`length\(\$\{posts\.content\}\)`/);
+  assert.doesNotMatch(homeQuery, /content:\s*posts\.content/);
   assert.match(contentUtils, /const longDateFormatter = new Intl\.DateTimeFormat/);
   assert.match(contentUtils, /export function estimateReadingMinutes/);
   assert.match(home, /<SiteNavigation/);
@@ -149,13 +153,31 @@ test("editor assets and post parsing stay scoped to their owners", async () => {
     source("features/admin/VditorEditor.tsx"), source("app/RouteTransition.tsx"),
   ]);
   assert.doesNotMatch(rootLayout, /vditor\/index\.css/);
-  assert.match(adminLayout, /\/vditor\/dist\/index\.css/);
-  assert.doesNotMatch(adminLayout, /import "vditor\/dist/);
+  assert.doesNotMatch(adminLayout, /vditor\/dist\/index\.css/);
+  assert.match(editor, /import "vditor\/dist\/index\.css"/);
   assert.match(postRoute, /parsePostPayload/);
   assert.match(postInput, /export function slugify/);
   assert.match(categoriesRoute, /domain\/posts\/post-input/);
   assert.match(editor, /await import\("vditor"\)/);
   assert.match(transitions, /const HTMLFlipBook = lazy\(loadFlipBook\)/);
+});
+
+test("public entry keeps rich reading assets behind interaction boundaries", async () => {
+  const [manifest, viteConfig] = await Promise.all([clientManifest(), source("vite.config.ts")]);
+  const modalLink = manifest["features/reader/ModalPostLink.tsx"];
+  const katexEntry = Object.values(manifest).find((entry) => entry.name === "MarkdownKatexStyles");
+  const mainCss = (await readdir(new URL("../dist/client/assets/", import.meta.url)))
+    .find((name) => /^index-.+\.css$/.test(name));
+
+  assert.ok(modalLink, "ModalPostLink client chunk is missing");
+  assert.deepEqual(modalLink.dynamicImports, ["features/reader/ModalPostReader.tsx"]);
+  assert.ok(modalLink.imports.every((name) => !name.includes("MarkdownRenderer") && !name.includes("mermaid")));
+  assert.ok(katexEntry?.css?.some((name) => name.includes("MarkdownKatexStyles")), "KaTeX CSS must remain a separate asset");
+  assert.match(viteConfig, /xingyu-katex-font-display/);
+  assert.match(viteConfig, /replaceAll\("font-display:block", "font-display:swap"\)/);
+  assert.ok(mainCss, "main public stylesheet is missing");
+  const mainCssSize = (await stat(new URL(`../dist/client/assets/${mainCss}`, import.meta.url))).size;
+  assert.ok(mainCssSize <= 270_000, `main public stylesheet exceeded 270 KB: ${mainCssSize} bytes`);
 });
 
 test("admin write routes delegate business rules to server services", async () => {
@@ -238,9 +260,10 @@ test("admin previews unsaved content through the real public pages", async () =>
 });
 
 test("Markdown Plus is rendered through one safe, shared pipeline", async () => {
-  const [renderer, mermaid, post, modal, bridge, packageJson] = await Promise.all([
+  const [renderer, mermaid, katexStyles, rootLayout, post, modal, bridge, packageJson] = await Promise.all([
     source("features/markdown/MarkdownRenderer.tsx"), source("features/markdown/MarkdownMermaid.tsx"),
-    source("features/reader/PostPageView.tsx"), source("features/reader/ModalPostLink.tsx"), source("app/AdminPreviewBridge.tsx"),
+    source("features/markdown/MarkdownKatexStyles.tsx"), source("app/layout.tsx"),
+    source("features/reader/PostPageView.tsx"), source("features/reader/ModalPostReader.tsx"), source("app/AdminPreviewBridge.tsx"),
     source("package.json"),
   ]);
   assert.match(renderer, /remarkMath/);
@@ -248,6 +271,10 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
   assert.match(renderer, /rehypeRaw/);
   assert.match(renderer, /rehypeSanitize/);
   assert.match(renderer, /rehypeKatex/);
+  assert.match(renderer, /hasMath/);
+  assert.match(renderer, /<MarkdownKatexStyles\s*\/>/);
+  assert.match(katexStyles, /katex\/dist\/katex\.min\.css/);
+  assert.doesNotMatch(rootLayout, /katex\/dist\/katex\.min\.css/);
   assert.match(renderer, /MarkdownMermaid/);
   assert.match(mermaid, /import\("mermaid"\)/);
   assert.doesNotMatch(mermaid, /cdn\.jsdelivr/);
@@ -258,9 +285,10 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
 });
 
 test("admin and markdown editor share the site theme palette", async () => {
-  const [styles,editor,toggle]=await Promise.all([
-    source("app/globals.css"),source("features/admin/VditorEditor.tsx"),source("features/navigation/ThemeToggle.tsx"),
+  const [publicStyles,adminStyles,editor,toggle]=await Promise.all([
+    source("app/globals.css"),source("app/admin/admin.css"),source("features/admin/VditorEditor.tsx"),source("features/navigation/ThemeToggle.tsx"),
   ]);
+  const styles=`${publicStyles}\n${adminStyles}`;
   assert.match(styles,/--admin-canvas:/);
   assert.match(styles,/--admin-panel:/);
   assert.match(styles,/\.vditor-host\.vditor\{/);
@@ -345,11 +373,12 @@ test("knowledge-space APIs and MCP expose scoped search with auditable writes", 
 });
 
 test("admin global search covers every article through the shared authenticated reader", async () => {
-  const [admin, search, postsApi, modal, browse, homeExperience, readerApi, readerPage, postView] = await Promise.all([
+  const [admin, search, postsApi, modalLink, modalReader, browse, homeExperience, readerApi, readerPage, postView] = await Promise.all([
     source("features/admin/AdminClient.tsx"),
     source("features/admin/AdminArticleSearch.tsx"),
     source("app/api/posts/route.ts"),
     source("features/reader/ModalPostLink.tsx"),
+    source("features/reader/ModalPostReader.tsx"),
     source("features/admin/AdminBrowsePanel.tsx"),
     source("features/home/BlogHomeExperience.tsx"),
     source("app/api/reader/[slug]/route.ts"),
@@ -368,11 +397,11 @@ test("admin global search covers every article through the shared authenticated 
   assert.doesNotMatch(admin,/setForm\(data\.post\);setStudio\("reading"\)/);
   assert.match(browse,/<BlogHomeExperience/);
   assert.match(homeExperience,/readerScope=\{admin\?"admin":"public"\}/);
-  assert.match(modal,/scope=admin/);
-  assert.match(modal,/xingyu:admin-reader-open/);
-  assert.match(modal,/管理阅读/);
-  assert.match(modal,/独立阅读/);
-  assert.match(modal,/event\.key\.toLocaleLowerCase\(\) === "e"/);
+  assert.match(modalReader,/scope=admin/);
+  assert.match(modalLink,/xingyu:admin-reader-open/);
+  assert.match(modalReader,/管理阅读/);
+  assert.match(modalReader,/独立阅读/);
+  assert.match(modalReader,/event\.key\.toLocaleLowerCase\(\) === "e"/);
   assert.match(readerApi,/isAdminRequest/);
   assert.match(readerApi,/getAdminReaderPost/);
   assert.match(readerPage,/getAdminIdentity/);
@@ -382,15 +411,17 @@ test("admin global search covers every article through the shared authenticated 
 });
 
 test("attachments inherit article visibility and are available to editors and MCP", async () => {
-  const [schema, bootstrap, attachments, uploadRoute, downloadRoute, renderer, editor, mcp] = await Promise.all([
+  const [schema, bootstrap, attachments, uploadRoute, downloadRoute, mediaRoute, renderer, editor, mcp, wrangler] = await Promise.all([
     source("db/schema.ts"),
     source("db/bootstrap.ts"),
     source("db/attachments.ts"),
     source("app/api/attachments/route.ts"),
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
+    source("app/api/media/[...key]/route.ts"),
     source("features/markdown/MarkdownRenderer.tsx"),
     source("features/admin/VditorEditor.tsx"),
     mcpSource(),
+    source("wrangler.production.jsonc"),
   ]);
   assert.match(schema, /attachments = sqliteTable\("attachments"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS attachments/);
@@ -398,6 +429,15 @@ test("attachments inherit article visibility and are available to editors and MC
   assert.match(attachments, /MAX_ATTACHMENT_BYTES = 25 \* 1024 \* 1024/);
   assert.match(uploadRoute, /isAdminRequest/);
   assert.match(downloadRoute, /postStatus === "published" && attachment\.postSpaceId === null/);
+  assert.match(downloadRoute, /env\.IMAGES/);
+  assert.match(downloadRoute, /private, no-store/);
+  assert.match(downloadRoute, /public, max-age=0, s-maxage=60/);
+  assert.match(mediaRoute, /output\(\{ format: "image\/webp", quality: 82 \}\)/);
+  assert.match(renderer, /srcSet/);
+  assert.match(renderer, /responsiveImageWidths/);
+  assert.match(wrangler, /"r2_buckets"[\s\S]*"binding"\s*:\s*"MEDIA"[\s\S]*"bucket_name"\s*:\s*"xingyu-production-media"/);
+  assert.match(wrangler, /"images"\s*:\s*\{\s*"binding"\s*:\s*"IMAGES"/);
+  assert.match(wrangler, /"cache"\s*:\s*\{\s*"enabled"\s*:\s*true/);
   assert.match(renderer, /md-attachment-card/);
   assert.match(editor, /attachments&&<label className=/);
   for (const tool of ["upload_attachment", "list_attachments", "download_attachment"]) {
@@ -405,8 +445,8 @@ test("attachments inherit article visibility and are available to editors and MC
   }
 });
 
-test("private article preview links are scoped, expiring and revocable", async () => {
-  const [schema, bootstrap, tokens, api, page, postView, renderer, attachmentRoute, admin, articles, spaces] = await Promise.all([
+test("private article preview links are scoped, expiring, revocable and never publicly cached", async () => {
+  const [schema, bootstrap, tokens, api, page, postView, renderer, attachmentRoute, admin, articles, spaces, worker] = await Promise.all([
     source("db/schema.ts"),
     source("db/bootstrap.ts"),
     source("db/post-preview-tokens.ts"),
@@ -418,6 +458,7 @@ test("private article preview links are scoped, expiring and revocable", async (
     source("features/admin/AdminClient.tsx"),
     source("features/admin/AdminArticlesPanel.tsx"),
     source("features/admin/AdminSpacesPanel.tsx"),
+    source("worker/index.ts"),
   ]);
   assert.match(schema,/postPreviewTokens = sqliteTable\("post_preview_tokens"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS post_preview_tokens/);
@@ -436,4 +477,6 @@ test("private article preview links are scoped, expiring and revocable", async (
   assert.match(admin,/AdminPreviewShareDialog/);
   assert.match(articles,/分享预览/);
   assert.match(spaces,/onShareArticle/);
+  assert.match(worker,/pathname\.startsWith\("\/preview"\)/);
+  assert.match(worker,/headers\.set\("Cache-Control",\s*"no-store"\)/);
 });

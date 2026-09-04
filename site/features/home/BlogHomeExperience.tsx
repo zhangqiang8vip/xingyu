@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { estimateReadingMinutes, formatLongDate } from "@/app/content-utils";
+import type { CSSProperties } from "react";
+import { avatarSource, estimateReadingMinutesFromLength, formatLongDate } from "@/app/content-utils";
 import ModalPostLink from "@/features/reader/ModalPostLink";
 import StableLink from "@/app/StableLink";
 import { copyrightText } from "@/domain/site/config";
@@ -13,7 +14,7 @@ export type BlogHomePost={
   title:string;
   slug:string;
   excerpt:string;
-  content?:string;
+  contentLength?:number;
   status?:"draft"|"published";
   viewCount:number;
   publishedAt:string|null;
@@ -84,9 +85,9 @@ export default function BlogHomeExperience({
   const card=(post:BlogHomePost,index:number,featuredCard=false)=><div className={`shared-post-card${featuredCard?" featured":""}${admin?" admin-card":""}`} key={post.id}>
     <ModalPostLink readerScope={admin?"admin":"public"} className={`post-card${featuredCard?" featured":index%3===1?" dark":""}`} publicId={post.publicId} slug={post.slug} onEdit={onEdit}>
       <div className="card-copy">
-        <span className="post-category" style={{color:post.categoryColor??undefined}}>{admin?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span>
+        <span className="post-category" style={{"--post-category-color":post.categoryColor??"#0071e3"} as CSSProperties}>{admin?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span>
         <h3>{post.title}</h3><p>{post.excerpt}</p>
-        <div className="post-meta"><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><span>·</span><span>{featuredCard&&post.content?`${estimateReadingMinutes(post.content)} 分钟阅读`:`${post.viewCount.toLocaleString()} 阅读`}</span></div>
+        <div className="post-meta"><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><span>·</span><span>{featuredCard&&post.contentLength?`${estimateReadingMinutesFromLength(post.contentLength)} 分钟阅读`:`${post.viewCount.toLocaleString("zh-CN")} 阅读`}</span></div>
       </div>
       {featuredCard?<div className="card-art warm"><span>01</span></div>:<span className="card-arrow">↗</span>}
     </ModalPostLink>
@@ -124,6 +125,6 @@ export default function BlogHomeExperience({
       {posts.length>0&&<div className="archive-cta"><span>{admin?"这里使用与公开博客完全相同的阅读体验":"首页只保留精选与最新文章"}</span>{admin?<button type="button" onClick={onOpenArticles}>管理全部文章 <b>→</b></button>:<Link href={selectedCategory==="all"?"/archive":`/archive?category=${selectedCategory}`}>浏览全部文章 <b>→</b></Link>}</div>}
     </section>
 
-    {!admin&&<><section className="about-section" id="about"><div className="about-card"><div className="author-portrait"><img data-preview-src="avatarUrl" src={settings.avatarUrl} alt={`${settings.authorName}头像`}/><span><b data-preview-field="authorName">{settings.authorName}</b> · <b data-preview-field="brandLatin">{settings.brandLatin}</b></span></div><div><p className="small-label">ABOUT <span data-preview-field="brandLatin">{settings.brandLatin}</span></p><h2 data-preview-field="homeAboutTitle">{settings.homeAboutTitle}</h2><p data-preview-field="homeAboutCopy">{settings.homeAboutCopy}</p><Link className="about-more" href="/about">更多关于<span data-preview-field="authorName">{settings.authorName}</span> <span>→</span></Link></div></div></section><footer><b><span data-preview-field="brandName">{settings.brandName}</span>。</b><span data-preview-field="footerCopyright">{copyrightText(settings.brandName,settings.footerText)}</span><span data-preview-field="tagline">{settings.tagline}</span></footer></>}
+    {!admin&&<><section className="about-section" id="about"><div className="about-card"><div className="author-portrait"><img data-preview-src="avatarUrl" src={avatarSource(settings.avatarUrl,"portrait")} width="170" height="170" loading="lazy" decoding="async" alt={`${settings.authorName}头像`}/><span><b data-preview-field="authorName">{settings.authorName}</b> · <b data-preview-field="brandLatin">{settings.brandLatin}</b></span></div><div><p className="small-label">ABOUT <span data-preview-field="brandLatin">{settings.brandLatin}</span></p><h2 data-preview-field="homeAboutTitle">{settings.homeAboutTitle}</h2><p data-preview-field="homeAboutCopy">{settings.homeAboutCopy}</p><Link className="about-more" href="/about" prefetch={false}>更多关于<span data-preview-field="authorName">{settings.authorName}</span> <span>→</span></Link></div></div></section><footer><b><span data-preview-field="brandName">{settings.brandName}</span>。</b><span data-preview-field="footerCopyright">{copyrightText(settings.brandName,settings.footerText)}</span><span data-preview-field="tagline">{settings.tagline}</span></footer></>}
   </>;
 }

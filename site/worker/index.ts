@@ -12,7 +12,7 @@ function isPublicDocumentRequest(request: Request, url: URL): boolean {
   if (!request.headers.get("Accept")?.includes("text/html")) return false;
   if (request.headers.has("Range") || request.headers.has("RSC")) return false;
   if (request.headers.has("Next-Router-State-Tree") || url.searchParams.has("_rsc")) return false;
-  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api") || url.pathname.startsWith("/oauth") || url.pathname.startsWith("/.well-known")) return false;
+  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api") || url.pathname.startsWith("/oauth") || url.pathname.startsWith("/.well-known") || url.pathname.startsWith("/preview")) return false;
   if (url.searchParams.has("adminPreview")) return false;
   return true;
 }
@@ -25,13 +25,13 @@ function addSecurityHeaders(response: Response, url: URL, cacheable: boolean): R
   headers.set("X-Frame-Options", "SAMEORIGIN");
   if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
-  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api/admin")) {
+  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/preview")) {
     headers.set("Cache-Control", "no-store");
     headers.set("X-Robots-Tag", "noindex, nofollow");
   } else if (cacheable && response.ok) {
     headers.set(
       "Cache-Control",
-      `public, max-age=0, s-maxage=${PUBLIC_DOCUMENT_TTL_SECONDS}, stale-while-revalidate=300`,
+      `public, max-age=0, s-maxage=${PUBLIC_DOCUMENT_TTL_SECONDS}`,
     );
   }
 
@@ -50,6 +50,7 @@ function addSecurityHeaders(response: Response, url: URL, cacheable: boolean): R
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const requestStartedAt = performance.now();
     const url = new URL(request.url);
     const cacheable = isPublicDocumentRequest(request, url);
 
@@ -77,6 +78,7 @@ const worker = {
       if (cached) {
         const headers = new Headers(cached.headers);
         headers.set("X-Xingyu-Cache", "HIT");
+        headers.set("Server-Timing", `edge-cache;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
         return new Response(cached.body, {
           status: cached.status,
           statusText: cached.statusText,
@@ -86,6 +88,7 @@ const worker = {
     }
 
     const response = addSecurityHeaders(await handler.fetch(request, env, ctx), url, cacheable);
+    response.headers.set("Server-Timing", `app;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
     if (cacheable && response.ok) {
       const cachedResponse = response.clone();
       cachedResponse.headers.set("X-Xingyu-Cache", "HIT");

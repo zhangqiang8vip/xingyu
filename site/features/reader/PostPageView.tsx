@@ -6,7 +6,7 @@ import IslandSearch from "@/features/navigation/IslandSearch";
 import AdminPreviewBridge from "@/app/AdminPreviewBridge";
 import ArticleEndMark from "./ArticleEndMark";
 import ModalPostLink from "./ModalPostLink";
-import { formatLongDate } from "@/app/content-utils";
+import { avatarSource, formatLongDate } from "@/app/content-utils";
 import PostReadingChrome from "./PostReadingChrome";
 import PostTableOfContents from "./PostTableOfContents";
 import PostSideNavigation from "./PostSideNavigation";
@@ -33,8 +33,8 @@ export default async function PostPageView({ post, adminPreview = false, readerS
     <header className="post-hero">
       <span className="post-category" data-preview-field="categoryName" data-preview-color="categoryColor" style={{color:post.categoryColor??undefined}}>{sharedPreview?`受邀预览 · ${"spacePath" in post&&post.spacePath?post.spacePath:"status" in post&&post.status==="draft"?"草稿":post.categoryName}`:admin&&"spaceId" in post&&post.spaceId?(post.spacePath||"知识空间"):admin&&"status" in post&&post.status==="draft"?"公开草稿":post.categoryName}</span>
       <h1 data-preview-field="title">{post.title}</h1><p data-preview-field="excerpt">{post.excerpt}</p>
-      <div className="post-byline"><img className="mini-avatar" data-preview-src="avatarUrl" src={settings.avatarUrl} alt={settings.authorName} /><b data-preview-field="authorName">{settings.authorName}</b><i />
-        <time data-preview-field="publishedLabel">{formatLongDate(post.publishedAt)}</time><i /><span>{post.viewCount.toLocaleString()} 阅读</span>
+      <div className="post-byline"><img className="mini-avatar" data-preview-src="avatarUrl" src={avatarSource(settings.avatarUrl,"small")} width="28" height="28" decoding="async" alt={settings.authorName} /><b data-preview-field="authorName">{settings.authorName}</b><i />
+        <time data-preview-field="publishedLabel">{formatLongDate(post.publishedAt)}</time><i /><span>{post.viewCount.toLocaleString("zh-CN")} 阅读</span>
       </div>
     </header>
     {!sharedPreview&&<PostSideNavigation previousPost={previousPost} nextPost={nextPost} readerScope={admin?"admin":"public"}/>}

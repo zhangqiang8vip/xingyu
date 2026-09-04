@@ -60,6 +60,14 @@ export default defineConfig(async ({ command, mode }) => {
         : {}),
     },
     plugins: [
+      {
+        name: "xingyu-katex-font-display",
+        enforce: "pre",
+        transform(code: string, id: string) {
+          if (!id.includes("katex/dist/katex.min.css")) return null;
+          return code.replaceAll("font-display:block", "font-display:swap");
+        },
+      },
       vinext(),
       sites(),
       cloudflare({

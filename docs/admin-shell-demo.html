@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>星屿后台 · 交互 Demo</title>
+  <style>
+    :root {
+      --admin-canvas: #f3f3f5;
+      --admin-panel: #fff;
+      --admin-control: #f1f1f4;
+      --admin-control-hover: #e8e8ec;
+      --admin-glass: rgba(255,255,255,.88);
+      --admin-ink: #202024;
+      --admin-copy: #56565d;
+      --admin-muted: #8a8a92;
+      --admin-line: rgba(25,25,32,.09);
+      --admin-line-strong: rgba(25,25,32,.14);
+      --admin-accent: #0a84ff;
+      --admin-accent-soft: rgba(10,132,255,.1);
+      --admin-shadow: 0 14px 38px rgba(27,32,44,.055);
+    }
+    html[data-theme="dark"] {
+      --admin-canvas: #0d0d0f;
+      --admin-panel: #18181b;
+      --admin-control: #222226;
+      --admin-control-hover: #2b2b30;
+      --admin-glass: rgba(25,25,28,.88);
+      --admin-ink: #f2f2f4;
+      --admin-copy: #c3c3c9;
+      --admin-muted: #8f8f97;
+      --admin-line: rgba(255,255,255,.085);
+      --admin-line-strong: rgba(255,255,255,.14);
+      --admin-accent: #58aaff;
+      --admin-accent-soft: rgba(88,170,255,.12);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100vh;
+      color: var(--admin-ink);
+      background: var(--admin-canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+    }
+    .page { width: min(1240px, calc(100% - 28px)); margin: 0 auto; padding: 32px 0 64px; }
+    .intro { max-width: 720px; margin: 0 auto 28px; text-align: center; }
+    .intro small { color: var(--admin-accent); font-size: 12px; font-weight: 700; letter-spacing: .16em; }
+    .intro h1 { margin: 10px 0 12px; font-size: clamp(28px, 4vw, 40px); letter-spacing: -.045em; }
+    .intro p { margin: 0 auto; color: var(--admin-muted); font-size: 15px; line-height: 1.7; }
+    .toolbar { display: flex; justify-content: center; gap: 8px; margin: 0 0 28px; }
+    .toolbar button {
+      height: 34px; padding: 0 14px; border: 1px solid var(--admin-line); border-radius: 999px;
+      background: var(--admin-panel); color: var(--admin-copy); font-size: 13px; font-weight: 650; cursor: pointer;
+    }
+    .toolbar button.on { color: #fff; border-color: var(--admin-accent); background: var(--admin-accent); }
+    .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .col { display: grid; gap: 10px; }
+    .col h2 { margin: 0; color: var(--admin-muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; text-align: center; }
+    .desk {
+      height: 560px; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 18px;
+      background: var(--admin-canvas); box-shadow: var(--admin-shadow);
+    }
+    .desk-now { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+    .side {
+      display: flex; flex-direction: column; padding: 22px 14px 16px; color: #f5f5f7; background: #171719;
+    }
+    .side .brand { padding: 0 10px; font-size: 18px; font-weight: 750; }
+    .side nav { margin-top: 28px; display: grid; gap: 6px; }
+    .side nav button {
+      width: 100%; padding: 11px 12px; display: flex; justify-content: space-between; align-items: center;
+      color: #aaaab0; border: 0; border-radius: 11px; background: transparent; text-align: left; font-size: 13px; cursor: pointer;
+    }
+    .side nav button.on { color: #fff; background: #2a2a2d; }
+    .side nav b { padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 10px; }
+    .side .user { margin-top: auto; padding-top: 12px; border-top: 1px solid #303034; color: #aaaab0; font-size: 12px; }
+    .main { padding: 28px 24px; overflow: auto; }
+    .kicker { margin: 0 0 6px; color: var(--admin-muted); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+    .main h3 { margin: 0; font-size: 32px; letter-spacing: -.04em; }
+    .main .sub { margin: 8px 0 18px; color: var(--admin-muted); font-size: 13px; }
+    .float-search {
+      position: absolute; top: 18px; left: 58%; width: 180px; height: 36px; transform: translateX(-50%);
+      display: flex; align-items: center; padding: 0 12px; border: 1px solid var(--admin-line-strong);
+      border-radius: 999px; background: var(--admin-glass); color: var(--admin-muted); font-size: 12px;
+    }
+    .desk { position: relative; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .cards div { padding: 14px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--admin-panel); }
+    .cards span { color: var(--admin-muted); font-size: 11px; }
+    .cards b { display: block; margin-top: 6px; font-size: 22px; }
+
+    .desk-next { display: grid; grid-template-columns: 228px 1fr; height: 100%; }
+    .side2 { display: flex; flex-direction: column; padding: 20px 12px 14px; background: var(--admin-panel); border-right: 1px solid var(--admin-line); }
+    .side2 .brand { padding: 4px 10px 16px; font-size: 18px; font-weight: 750; }
+    .group { margin: 0 8px 14px; color: var(--admin-muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+    .side2 nav { display: grid; gap: 3px; }
+    .side2 nav button {
+      width: 100%; min-height: 38px; padding: 0 12px; display: flex; justify-content: space-between; align-items: center;
+      color: var(--admin-copy); border: 0; border-radius: 10px; background: transparent; text-align: left; font-size: 13px; cursor: pointer;
+    }
+    .side2 nav button.on { color: var(--admin-ink); background: var(--admin-accent-soft); }
+    .side2 nav button.on b { color: var(--admin-accent); background: transparent; }
+    .side2 nav b { color: var(--admin-muted); font-size: 11px; font-weight: 650; }
+    .side2 .user { margin-top: auto; padding: 12px 10px 0; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--admin-line); color: var(--admin-copy); font-size: 12px; }
+    .main2 { padding: 22px 22px 20px; }
+    .head2 { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .head2 h3 { margin: 0; font-size: 24px; }
+    .insearch { flex: 1; max-width: 280px; height: 36px; padding: 0 12px; display: flex; align-items: center; border: 1px solid var(--admin-line); border-radius: 11px; background: var(--admin-panel); color: var(--admin-muted); font-size: 12px; }
+    .newb { height: 36px; padding: 0 12px; color: #fff; border: 0; border-radius: 11px; background: var(--admin-accent); font-size: 12px; font-weight: 650; }
+
+    .phones { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 28px; }
+    .phone { width: 100%; max-width: 360px; height: 620px; margin: auto; padding: 10px; border-radius: 32px; background: #111; }
+    .screen { position: relative; height: 100%; overflow: hidden; border-radius: 24px; background: var(--admin-canvas); }
+    .topbar { height: 56px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; background: var(--admin-glass); border-bottom: 1px solid var(--admin-line); font-weight: 750; }
+    .p-main { padding: 18px 14px 80px; }
+    .p-main h3 { margin: 0 0 8px; font-size: 26px; }
+    .dock {
+      position: absolute; right: 8px; bottom: 8px; left: 8px; height: 58px; padding: 5px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px;
+      border: 1px solid var(--admin-line-strong); border-radius: 18px; background: var(--admin-glass);
+    }
+    .dock button {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      border: 0; border-radius: 13px; background: transparent; color: var(--admin-copy); font-size: 9px; cursor: pointer;
+    }
+    .dock button.on { color: var(--admin-accent); background: var(--admin-accent-soft); }
+    .dock-scroll { display: flex; overflow-x: auto; gap: 0; }
+    .dock-scroll button { min-width: 70px; flex: none; }
+    .sheet {
+      position: absolute; right: 8px; bottom: 74px; left: 8px; padding: 8px;
+      border: 1px solid var(--admin-line-strong); border-radius: 18px; background: var(--admin-panel);
+      box-shadow: 0 18px 48px rgba(0,0,0,.16);
+    }
+    .sheet button {
+      width: 100%; min-height: 40px; padding: 0 12px; display: flex; justify-content: space-between; align-items: center;
+      border: 0; border-radius: 11px; background: transparent; color: inherit; font-size: 14px; cursor: pointer;
+    }
+    .sheet button.on { background: var(--admin-accent-soft); color: var(--admin-accent); }
+    .why { margin-top: 28px; display: grid; gap: 10px; }
+    .why article { padding: 16px 18px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--admin-panel); }
+    .why b { display: block; margin-bottom: 4px; }
+    .why span { color: var(--admin-copy); font-size: 13px; line-height: 1.65; }
+    @media (max-width: 900px) { .stage, .phones { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="intro">
+      <small>ADMIN SHELL DEMO</small>
+      <h1>后台先改交互，配色不动</h1>
+      <p>颜色还是现在这套灰底、白卡片、蓝色强调。差的是信息层级和手指路径：8 个入口平铺在一起，手机底栏还按 4 格来排。</p>
+    </header>
+    <div class="toolbar">
+      <button class="on" data-view="desk" type="button">桌面对比</button>
+      <button data-view="phone" type="button">手机对比</button>
+      <button id="theme" type="button">切换明暗</button>
+    </div>
+
+    <div id="desk-stage" class="stage">
+      <section class="col">
+        <h2>现在</h2>
+        <div class="desk">
+          <div class="float-search">搜索全部文章</div>
+          <div class="desk-now">
+            <aside class="side">
+              <div class="brand">星屿</div>
+              <nav id="now-desk-nav">
+                <button class="on" type="button">浏览<b>47</b></button>
+                <button type="button">文章管理<b>42</b></button>
+                <button type="button">知识空间<b>5</b></button>
+                <button type="button">首页设置<b>01</b></button>
+                <button type="button">接入设置<b>03</b></button>
+                <button type="button">AI 连接<b>MCP</b></button>
+                <button type="button">关于设置<b>04</b></button>
+                <button type="button">分类管理<b>3</b></button>
+              </nav>
+              <div class="user">管理员 · 星屿</div>
+            </aside>
+            <section class="main">
+              <p class="kicker">CONTENT</p>
+              <h3 id="now-desk-title">文章管理</h3>
+              <p class="sub">8 个入口同一列，写作和设置混在一起。搜索漂在页面中间，和侧栏抢位置。</p>
+              <div class="cards"><div><span>全部文章</span><b>42</b></div><div><span>草稿</span><b>6</b></div></div>
+            </section>
+          </div>
+        </div>
+      </section>
+      <section class="col">
+        <h2>方案</h2>
+        <div class="desk">
+          <div class="desk-next">
+            <aside class="side2">
+              <div class="brand">星屿</div>
+              <div class="group">内容</div>
+              <nav id="next-desk-nav">
+                <button class="on" data-title="浏览" type="button">浏览<b>47</b></button>
+                <button data-title="文章" type="button">文章<b>42</b></button>
+                <button data-title="知识空间" type="button">知识空间<b>5</b></button>
+              </nav>
+              <div class="group">站点</div>
+              <nav>
+                <button data-title="首页设置" type="button">首页</button>
+                <button data-title="关于页" type="button">关于</button>
+                <button data-title="分类" type="button">分类<b>3</b></button>
+              </nav>
+              <div class="group">连接</div>
+              <nav>
+                <button data-title="接入" type="button">接入</button>
+                <button data-title="AI 连接" type="button">AI 连接</button>
+              </nav>
+              <div class="user"><span>星屿 · 管理员</span><span>‹</span></div>
+            </aside>
+            <section class="main2">
+              <div class="head2">
+                <h3 id="next-desk-title">浏览</h3>
+                <div class="insearch">搜索文章</div>
+                <button class="newb" type="button">新建</button>
+              </div>
+              <p class="sub">入口按工作分组。搜索放进页头，不再漂成第二座岛。数字只在有计数意义时出现。</p>
+              <div class="cards"><div><span>公开文章</span><b>42</b></div><div><span>私有内容</span><b>5</b></div></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="phone-stage" class="phones" hidden>
+      <section class="col">
+        <h2>现在 · 8 个入口塞底栏</h2>
+        <div class="phone"><div class="screen">
+          <div class="topbar">星屿</div>
+          <div class="p-main"><h3>文章管理</h3><p class="sub">底栏按 4 列写死，实际有 8 个按钮，只能横向滑。9px 字，点不准。</p></div>
+          <div class="dock dock-scroll">
+            <button class="on" type="button">浏览</button>
+            <button type="button">文章</button>
+            <button type="button">空间</button>
+            <button type="button">首页</button>
+            <button type="button">接入</button>
+            <button type="button">AI</button>
+            <button type="button">关于</button>
+            <button type="button">分类</button>
+          </div>
+        </div></div>
+      </section>
+      <section class="col">
+        <h2>方案 · 4 个主入口 + 更多</h2>
+        <div class="phone"><div class="screen" id="phone-next">
+          <div class="topbar">星屿<div class="insearch" style="max-width:140px;height:30px">搜索</div></div>
+          <div class="p-main"><h3 id="phone-title">浏览</h3><p class="sub">拇指只负责最高频的三件事。设置进「更多」，不再和写作抢底栏。</p></div>
+          <div class="sheet" id="more-sheet" hidden>
+            <button type="button" data-title="首页设置">首页设置</button>
+            <button type="button" data-title="关于页">关于</button>
+            <button type="button" data-title="分类">分类</button>
+            <button type="button" data-title="接入">接入</button>
+            <button type="button" data-title="AI 连接">AI 连接</button>
+          </div>
+          <div class="dock">
+            <button class="on" data-tab="浏览" type="button">浏览</button>
+            <button data-tab="文章" type="button">文章</button>
+            <button data-tab="知识空间" type="button">空间</button>
+            <button id="more-btn" type="button">更多</button>
+          </div>
+        </div></div>
+      </section>
+    </div>
+
+    <section class="why">
+      <article><b>现在差在交互，不在配色</b><span>灰画布、白卡片、蓝强调可以留。难看是因为 8 个同级入口、假数字徽章（01 / 03 / MCP）、搜索悬在正中、手机底栏却按 4 格布局。</span></article>
+      <article><b>这版更好的原因</b><span>把「每天写」和「偶尔改设置」拆开。桌面用分组侧栏；手机只留浏览 / 文章 / 空间 / 更多。路径变短，不用横向找入口。</span></article>
+      <article><b>还没改正式后台</b><span>这页只是 Demo。你点头后，我按这个信息架构改 AdminSidebar 和手机底栏，颜色继续用 --admin-* 。</span></article>
+    </section>
+  </div>
+  <script>
+    const deskStage = document.getElementById("desk-stage");
+    const phoneStage = document.getElementById("phone-stage");
+    document.querySelectorAll(".toolbar [data-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".toolbar [data-view]").forEach((item) => item.classList.toggle("on", item === btn));
+        const phone = btn.dataset.view === "phone";
+        deskStage.hidden = phone;
+        phoneStage.hidden = !phone;
+      });
+    });
+    document.getElementById("theme").addEventListener("click", () => {
+      const root = document.documentElement;
+      root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+    });
+    document.querySelectorAll("#next-desk-nav button, .side2 nav button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".side2 nav button").forEach((item) => item.classList.toggle("on", item === btn));
+        if (btn.dataset.title) document.getElementById("next-desk-title").textContent = btn.dataset.title;
+      });
+    });
+    const moreBtn = document.getElementById("more-btn");
+    const moreSheet = document.getElementById("more-sheet");
+    const phoneTitle = document.getElementById("phone-title");
+    document.querySelectorAll(".dock[data-tab], #phone-next .dock button[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#phone-next .dock button").forEach((item) => item.classList.toggle("on", item === btn));
+        moreSheet.hidden = true;
+        phoneTitle.textContent = btn.dataset.tab;
+      });
+    });
+    moreBtn.addEventListener("click", () => {
+      document.querySelectorAll("#phone-next .dock button").forEach((item) => item.classList.toggle("on", item === moreBtn));
+      moreSheet.hidden = !moreSheet.hidden;
+    });
+    moreSheet.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moreSheet.querySelectorAll("button").forEach((item) => item.classList.toggle("on", item === btn));
+        phoneTitle.textContent = btn.dataset.title;
+        moreSheet.hidden = true;
+      });
+    });
+  </script>
+</body>
+</html>

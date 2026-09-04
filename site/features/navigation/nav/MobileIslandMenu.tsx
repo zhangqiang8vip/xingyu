@@ -45,6 +45,7 @@ export default function MobileIslandMenu({ current }: { current?: NavCurrent }) 
           className={current === item.id ? "nav-current" : undefined}
           aria-current={current === item.id ? "page" : undefined}
           href={item.href}
+          prefetch={false}
           onClick={() => setOpen(false)}
         >{item.label}{current === item.id ? <i /> : null}</Link>)}
       </div>

@@ -11,6 +11,7 @@ export default function DesktopIslandNav({ current }: { current?: NavCurrent }) 
         className={current === item.id ? "nav-current" : undefined}
         aria-current={current === item.id ? "page" : undefined}
         href={item.href}
+        prefetch={false}
       >{item.label}</Link>)}
     </div>
     <NavTools />

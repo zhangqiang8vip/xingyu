@@ -11,6 +11,7 @@ import remarkMath from "remark-math";
 import { visit } from "unist-util-visit";
 import MarkdownMermaid from "./MarkdownMermaid";
 import MarkdownCodeCopyButton from "./MarkdownCodeCopyButton";
+import MarkdownKatexStyles from "./MarkdownKatexStyles";
 
 const calloutNames = new Set(["tip", "note", "warning", "quote"]);
 const calloutLabels: Record<string, string> = { tip: "提示", note: "笔记", warning: "注意", quote: "摘录" };
@@ -60,6 +61,18 @@ function previewAuthorizedUrl(url: string | undefined, previewToken?: string) {
   return `${url}${separator}preview=${encodeURIComponent(previewToken)}`;
 }
 
+const responsiveImageWidths = [480, 768, 1200, 1600] as const;
+
+function responsiveImageUrl(url: string, width: number) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}width=${width}`;
+}
+
+function isResizableLocalImage(url: string) {
+  return /^\/api\/(?:attachments\/att_[a-f0-9]{32}\/|media\/)/i.test(url)
+    && !/\.gif(?:\?|$)/i.test(url);
+}
+
 function remarkXingyuDirectives() {
   return (tree: Root) => {
     visit(tree, "containerDirective", (node) => {
@@ -90,15 +103,18 @@ const markdownSchema = {
 };
 
 export default function MarkdownRenderer({ children, previewToken }: { children: string; previewToken?: string }) {
-  return <ReactMarkdown
-    remarkPlugins={[remarkGfm, remarkMath, remarkDirective, remarkXingyuDirectives]}
-    rehypePlugins={[
-      rehypeRaw,
-      [rehypeSanitize, markdownSchema],
-      [rehypeHighlight, { detect: true, plainText: ["mermaid", "plaintext", "text", "txt"] }],
-      rehypeKatex,
-    ]}
-    components={{
+  const hasMath = /(^|[^\\])\$\$[\s\S]+?\$\$|(^|[^\\])\$(?!\s)(?:\\.|[^$\n])+\$/m.test(children);
+  return <>
+    {hasMath && <MarkdownKatexStyles />}
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath, remarkDirective, remarkXingyuDirectives]}
+      rehypePlugins={[
+        rehypeRaw,
+        [rehypeSanitize, markdownSchema],
+        [rehypeHighlight, { detect: true, plainText: ["mermaid", "plaintext", "text", "txt"] }],
+        rehypeKatex,
+      ]}
+      components={{
       a({ href, title, children: linkChildren, ...props }) {
         const attachment = attachmentDetails(href, title, linkChildren);
         if (!attachment) return <a href={href} title={title} {...props}>{linkChildren}</a>;
@@ -109,7 +125,13 @@ export default function MarkdownRenderer({ children, previewToken }: { children:
         </a>;
       },
       img({ src, alt, ...props }) {
-        return <img src={previewAuthorizedUrl(typeof src === "string" ? src : undefined, previewToken)} alt={alt ?? ""} {...props} />;
+        const resolvedSrc = previewAuthorizedUrl(typeof src === "string" ? src : undefined, previewToken);
+        const responsive = resolvedSrc && isResizableLocalImage(resolvedSrc) ? {
+          src: responsiveImageUrl(resolvedSrc, 1200),
+          srcSet: responsiveImageWidths.map((width) => `${responsiveImageUrl(resolvedSrc, width)} ${width}w`).join(", "),
+          sizes: "(max-width: 760px) calc(100vw - 40px), 720px",
+        } : { src: resolvedSrc };
+        return <img {...props} {...responsive} loading={props.loading ?? "lazy"} decoding={props.decoding ?? "async"} alt={alt ?? ""} />;
       },
       pre({ children: preChildren, node, ...props }) {
         const source = readNodeText(preChildren).replace(/\n$/, "");
@@ -130,6 +152,7 @@ export default function MarkdownRenderer({ children, previewToken }: { children:
         const title = String((props as Record<string, unknown>)["data-title"] || (props as Record<string, unknown>).dataTitle || "说明");
         return <aside {...props}><strong>{title}</strong>{asideChildren}</aside>;
       },
-    }}
-  >{children}</ReactMarkdown>;
+      }}
+    >{children}</ReactMarkdown>
+  </>;
 }

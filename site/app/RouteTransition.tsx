@@ -26,17 +26,6 @@ export default function RouteTransition({ children }: { children: ReactNode }) {
   const [flip, setFlip] = useState<FlipState | null>(null);
   const active = useRef(false);
 
-  useEffect(() => {
-    // Warm the optional animation after first paint without delaying page content.
-    const preload = () => { if (document.documentElement.dataset.motionMode !== "static") void loadFlipBook(); };
-    const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void) => number; cancelIdleCallback?: (id: number) => void };
-    if (idleWindow.requestIdleCallback) {
-      const id = idleWindow.requestIdleCallback(preload);
-      return () => idleWindow.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(preload, 400);
-    return () => window.clearTimeout(id);
-  }, []);
   const pending = useRef(false);
   const previousVariant = useRef<Variant>("page");
   const cache = useRef(new Map<string, Promise<string | null>>());
@@ -56,11 +45,18 @@ export default function RouteTransition({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const preload = () => {
-      document.querySelectorAll<HTMLAnchorElement>('a[data-route-direction][href]').forEach((anchor) => { void loadSnapshot(anchor.href); });
-    };
-    const timer = setTimeout(preload, 180);
-    return () => clearTimeout(timer);
+    const anchors = document.querySelectorAll<HTMLAnchorElement>('a[data-route-direction][href]');
+    if (!anchors.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const anchor = entry.target as HTMLAnchorElement;
+        void loadSnapshot(anchor.href);
+        observer.unobserve(anchor);
+      });
+    }, { rootMargin:"600px 0px" });
+    anchors.forEach((anchor) => observer.observe(anchor));
+    return () => observer.disconnect();
   }, [loadSnapshot, pathname]);
 
   useEffect(() => {
