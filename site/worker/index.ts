@@ -3,21 +3,12 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { handleBlogMcpRequest, isBlogMcpPath } from "./blog-mcp";
 import { handleOAuthRequest, isOAuthPath } from "./oauth";
+import { hasRequestIdentity, isHtmlDocumentRequest, isPublicDocumentRequest, publicDocumentCacheControl, publicDocumentCacheKey, publicDocumentCategory, publicDocumentStorageCacheControl, readPublicContentRevision, responseAllowsPublicStorage } from "./public-document-cache";
+import { normalizeImageOutputFormat } from "../domain/media/image-transform";
 
-const PUBLIC_DOCUMENT_TTL_SECONDS = 120;
 const edgeCache = (caches as CacheStorage & { default: Cache }).default;
 
-function isPublicDocumentRequest(request: Request, url: URL): boolean {
-  if (request.method !== "GET") return false;
-  if (!request.headers.get("Accept")?.includes("text/html")) return false;
-  if (request.headers.has("Range") || request.headers.has("RSC")) return false;
-  if (request.headers.has("Next-Router-State-Tree") || url.searchParams.has("_rsc")) return false;
-  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api") || url.pathname.startsWith("/oauth") || url.pathname.startsWith("/.well-known") || url.pathname.startsWith("/preview")) return false;
-  if (url.searchParams.has("adminPreview")) return false;
-  return true;
-}
-
-function addSecurityHeaders(response: Response, url: URL, cacheable: boolean): Response {
+function addSecurityHeaders(response: Response, url: URL, publicDocument: boolean, revision: string | null, identityBearing: boolean, htmlDocument: boolean): Response {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -25,15 +16,13 @@ function addSecurityHeaders(response: Response, url: URL, cacheable: boolean): R
   headers.set("X-Frame-Options", "SAMEORIGIN");
   if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
-  if (url.pathname.startsWith("/admin") || url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/preview")) {
+  if (identityBearing || url.pathname.startsWith("/admin") || url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/preview")) {
     headers.set("Cache-Control", "no-store");
     headers.set("X-Robots-Tag", "noindex, nofollow");
-  } else if (cacheable && response.ok) {
-    headers.set(
-      "Cache-Control",
-      `public, max-age=0, s-maxage=${PUBLIC_DOCUMENT_TTL_SECONDS}`,
-    );
+  } else if (htmlDocument) {
+    headers.set("Cache-Control",publicDocument&&response.ok?publicDocumentCacheControl(revision):"no-store");
   }
+  if(htmlDocument)headers.set("CDN-Cache-Control","no-store");
 
   return new Response(response.body, {
     status: response.status,
@@ -52,14 +41,21 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestStartedAt = performance.now();
     const url = new URL(request.url);
+    const identityBearing=hasRequestIdentity(request);
+    const htmlDocument=isHtmlDocumentRequest(request);
     const cacheable = isPublicDocumentRequest(request, url);
+    const revisionStartedAt=performance.now();
+    const category=cacheable?publicDocumentCategory(url):undefined;
+    const revision=cacheable?await readPublicContentRevision(env.DB,category??undefined):null;
+    const revisionDuration=performance.now()-revisionStartedAt;
+    const cacheKey=cacheable&&revision!==null?publicDocumentCacheKey(url,revision):null;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format:normalizeImageOutputFormat(format), quality });
           return result.response();
         },
       }, allowedWidths);
@@ -73,12 +69,14 @@ const worker = {
       return handleBlogMcpRequest(request, env, ctx);
     }
 
-    if (cacheable) {
-      const cached = await edgeCache.match(request);
+    if (cacheKey) {
+      const cached = await edgeCache.match(cacheKey);
       if (cached) {
         const headers = new Headers(cached.headers);
         headers.set("X-Xingyu-Cache", "HIT");
-        headers.set("Server-Timing", `edge-cache;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
+        headers.set("Cache-Control",publicDocumentCacheControl(revision));
+        headers.set("CDN-Cache-Control","no-store");
+        headers.set("Server-Timing", `cache-revision;dur=${revisionDuration.toFixed(1)}, edge-cache;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
         return new Response(cached.body, {
           status: cached.status,
           statusText: cached.statusText,
@@ -87,16 +85,20 @@ const worker = {
       }
     }
 
-    const response = addSecurityHeaders(await handler.fetch(request, env, ctx), url, cacheable);
-    response.headers.set("Server-Timing", `app;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
-    if (cacheable && response.ok) {
+    const appResponse=await handler.fetch(request, env, ctx);
+    const publicStorageAllowed=cacheable&&responseAllowsPublicStorage(appResponse);
+    const response = addSecurityHeaders(appResponse, url, publicStorageAllowed,revision,identityBearing,htmlDocument);
+    response.headers.set("Server-Timing", `${cacheable?`cache-revision;dur=${revisionDuration.toFixed(1)}, `:""}app;dur=${(performance.now() - requestStartedAt).toFixed(1)}`);
+    if (cacheKey && publicStorageAllowed) {
       const cachedResponse = response.clone();
+      cachedResponse.headers.set("Cache-Control",publicDocumentStorageCacheControl());
+      cachedResponse.headers.delete("CDN-Cache-Control");
       cachedResponse.headers.set("X-Xingyu-Cache", "HIT");
-      ctx.waitUntil(edgeCache.put(request, cachedResponse));
+      ctx.waitUntil(edgeCache.put(cacheKey, cachedResponse));
       response.headers.set("X-Xingyu-Cache", "MISS");
     }
     return response;
   },
-};
+} satisfies ExportedHandler<Env>;
 
 export default worker;

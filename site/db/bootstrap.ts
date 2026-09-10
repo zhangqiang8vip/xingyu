@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
 import { createPostPublicId } from "./public-id";
+import { PUBLIC_CACHE_SCHEMA_STATEMENTS } from "./public-cache-schema";
 
 let ready: Promise<void> | null = null;
 
@@ -17,7 +18,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "11";
+  const schemaVersion = "12";
 
   try {
     const markers = await d1.prepare("SELECT key, value FROM app_meta WHERE key IN ('schema_version', 'app_environment')")
@@ -256,6 +257,7 @@ async function initialize() {
       INSERT INTO posts_fts(posts_fts, rowid, title, excerpt, content) VALUES ('delete', old.id, old.title, old.excerpt, old.content);
       INSERT INTO posts_fts(rowid, title, excerpt, content) VALUES (new.id, new.title, new.excerpt, new.content);
     END`),
+    ...PUBLIC_CACHE_SCHEMA_STATEMENTS.map((statement)=>d1.prepare(statement)),
   ]);
 
   const postColumns = await d1.prepare("PRAGMA table_info(posts)").all<{ name: string }>();

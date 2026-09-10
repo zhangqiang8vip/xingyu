@@ -5,6 +5,7 @@ import { mcpActivity } from "./schema";
 
 export type McpActivityAction =
   | "create_draft"
+  | "upload_attachment"
   | "update_post"
   | "update_page"
   | "publish_post"

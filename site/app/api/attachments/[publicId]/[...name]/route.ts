@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import { attachmentCacheControl, attachmentEtagMatches } from "#domain/attachments/http-cache";
+import { mergeResponseHeaders } from "#domain/media/image-transform";
 import { getAttachment } from "../../../../../db/attachments";
 import { previewTokenCanReadPost } from "../../../../../db/post-preview-tokens";
 import { isAdminRequest, unauthorized } from "../../../admin-auth";
@@ -19,17 +21,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ publ
   if (!object) return new Response("Not found", { status: 404 });
   const width = requestedImageWidth(new URL(request.url));
   if (width && attachment.size <= MAX_IMAGE_TRANSFORM_BYTES && canResize(attachment.contentType) && env.IMAGES) {
+    const etag = variantEtag(object.httpEtag, width);
+    if (attachmentEtagMatches(request.headers.get("If-None-Match"), etag)) {
+      return new Response(null, { status: 304, headers: imageHeaders({
+        cacheControl: attachmentCacheControl(isPublic),
+        contentDisposition: `inline; filename*=UTF-8''${encodeRfc5987(webpFilename(attachment.originalName))}`,
+        etag,
+      }) });
+    }
     try {
       const transformed = await env.IMAGES.input(object.body)
         .transform({ width, fit: "scale-down" })
         .output({ format: "image/webp", quality: 82 });
-      return transformed.response({ headers: imageHeaders({
-        // Article visibility can change after this response is cached. Keep the
-        // same short edge lifetime as the original attachment response.
-        cacheControl: isPublic ? "public, max-age=0, s-maxage=60" : "private, no-store",
+      return mergeResponseHeaders(transformed.response(), imageHeaders({
+        // Article visibility can change after this response is reused. Force
+        // revalidation so every request re-enters the permission check above.
+        cacheControl: attachmentCacheControl(isPublic),
         contentDisposition: `inline; filename*=UTF-8''${encodeRfc5987(webpFilename(attachment.originalName))}`,
-        etag: variantEtag(object.httpEtag, width),
-      }) });
+        etag,
+      }));
     } catch (error) {
       console.warn({
         event: "attachment_image_transform_failed",
@@ -49,8 +59,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ publ
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Content-Disposition", `${canPreview(attachment.contentType) ? "inline" : "attachment"}; filename*=UTF-8''${encodeRfc5987(attachment.originalName)}`);
   // Visibility can change when an article is withdrawn or moved into a private
-  // space, so never give attachment bytes an immutable cache lifetime.
-  headers.set("Cache-Control", isPublic ? "public, max-age=0, s-maxage=60" : "private, no-store");
+  // space. Public bytes may be stored, but every reuse must re-enter this route
+  // and re-check the article before a 304 is returned.
+  headers.set("Cache-Control", attachmentCacheControl(isPublic));
+  if (attachmentEtagMatches(request.headers.get("If-None-Match"), object.httpEtag)) {
+    headers.delete("Content-Length");
+    return new Response(null, { status: 304, headers });
+  }
   return new Response(object.body, { headers });
 }
 

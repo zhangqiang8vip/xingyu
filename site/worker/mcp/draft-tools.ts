@@ -39,7 +39,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       post_identifier: IDENTIFIER_SCHEMA.optional(),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("上传文章附件"),
     },
-    outputSchema: { ok: z.boolean(), attachment: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: { ok: z.boolean(), attachment: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ filename, content_type, content_base64, post_identifier, change_summary }) => {
     try {
@@ -55,6 +55,15 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
         bytes,
         postId: post?.id ?? null,
       });
+      const changedFields = ["attachments"];
+      const activity = post ? await recordActivitySafely({
+        action: "upload_attachment",
+        post,
+        beforeStatus: post.status,
+        changedFields,
+        summary: change_summary,
+        clientLabel,
+      }) : null;
       return toolResult({
         ok: true,
         attachment: {
@@ -69,6 +78,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
           change_summary,
           visibility: post ? (post.status === "published" && post.spaceId === null ? "public" : "private") : "unbound_private",
         },
+        ...(post ? { receipt: activityReceipt("upload_attachment", activity, change_summary, changedFields) } : {}),
       });
     } catch (error) {
       return toolFailure(error);

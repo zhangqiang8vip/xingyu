@@ -124,6 +124,12 @@ export const contentPages = sqliteTable("content_pages", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("content_pages_slug_uidx").on(table.slug)]);
 
+export const publicCacheState=sqliteTable("public_cache_state",{
+  id:integer("id").primaryKey(),
+  revision:integer("revision").notNull().default(1),
+  updatedAt:text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const postViews = sqliteTable("post_views", {
   postId: integer("post_id").notNull(),
   visitorHash: text("visitor_hash").notNull(),

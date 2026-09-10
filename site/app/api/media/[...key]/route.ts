@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { mergeResponseHeaders } from "#domain/media/image-transform";
 
 export async function GET(request: Request, { params }: { params: Promise<{ key: string[] }> }) {
   const { key } = await params;
@@ -12,11 +13,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
       const transformed = await env.IMAGES.input(object.body)
         .transform({ width, fit: "scale-down" })
         .output({ format: "image/webp", quality: 82 });
-      return transformed.response({ headers: {
+      return mergeResponseHeaders(transformed.response(), {
         "Cache-Control": "public, max-age=31536000, immutable",
         "ETag": variantEtag(object.httpEtag, width),
         "X-Content-Type-Options": "nosniff",
-      } });
+      });
     } catch (error) {
       console.warn({ event: "media_image_transform_failed", width, message: error instanceof Error ? error.message : "unknown" });
       object = await env.MEDIA.get(objectKey);
