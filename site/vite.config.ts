@@ -1,7 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
-import { sites } from "./plugins/sites-vite-plugin";
+import hostingConfig from "./.openai/hosting.json" with { type: "json" };
+import { sites } from "./plugins/sites-vite-plugin.ts";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -20,7 +20,6 @@ export default defineConfig(async ({ command, mode }) => {
     compatibility_flags: ["nodejs_compat"],
     vars: {
       APP_ENV: appEnvironment,
-      ...(process.env.MCP_WRITE_TOKEN ? { MCP_WRITE_TOKEN: process.env.MCP_WRITE_TOKEN } : {}),
     },
     d1_databases: d1
       ? [
