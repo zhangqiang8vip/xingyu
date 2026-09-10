@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentPropsWithoutRef } from "react";
 import { postPath } from "@/app/post-path";
+import { adminReaderHref, normalizeAdminReaderContext, type AdminReaderContext, type AdminReaderReturnTarget } from "@/domain/reader/admin-reader-context";
 
 const ModalPostReader = lazy(() => import("./ModalPostReader"));
 
@@ -9,21 +10,25 @@ type Props = Omit<ComponentPropsWithoutRef<"a">, "href"> & {
   publicId:string;
   slug:string;
   readerScope?:"public"|"admin";
+  adminReaderContext?:AdminReaderContext;
   controllerOnly?:boolean;
-  onEdit?:(postId:number)=>void;
+  onEdit?:(postId:number,returnTarget?:AdminReaderReturnTarget)=>void;
 };
 
-export default function ModalPostLink({ publicId, slug, readerScope="public", controllerOnly=false, onEdit, children, onClick, ...props }: Props) {
+export default function ModalPostLink({ publicId, slug, readerScope="public", adminReaderContext, controllerOnly=false, onEdit, children, onClick, ...props }: Props) {
   const [activePublicId,setActivePublicId]=useState(publicId);
+  const [activeAdminContext,setActiveAdminContext]=useState(()=>normalizeAdminReaderContext(adminReaderContext));
   const [open,setOpen]=useState(false);
   const close=useCallback(()=>setOpen(false),[]);
 
   useEffect(()=>{
     if(!controllerOnly)return;
     const openRequested=(event:Event)=>{
-      const requested=(event as CustomEvent<{publicId?:string}>).detail?.publicId;
+      const detail=(event as CustomEvent<{publicId?:string;adminReaderContext?:AdminReaderContext}>).detail;
+      const requested=detail?.publicId;
       if(!requested)return;
       setActivePublicId(requested);
+      setActiveAdminContext(normalizeAdminReaderContext(detail.adminReaderContext));
       setOpen(true);
     };
     window.addEventListener("xingyu:admin-reader-open",openRequested);
@@ -36,13 +41,14 @@ export default function ModalPostLink({ publicId, slug, readerScope="public", co
     if(document.documentElement.dataset.readingMode==="page")return;
     event.preventDefault();
     setActivePublicId(publicId);
+    setActiveAdminContext(normalizeAdminReaderContext(adminReaderContext));
     setOpen(true);
   };
 
   return <>
-    {!controllerOnly&&<a {...props} href={readerScope==="admin"?`/admin/reader/${encodeURIComponent(publicId)}`:postPath({publicId,slug})} onClick={openReader}>{children}</a>}
+    {!controllerOnly&&<a {...props} href={readerScope==="admin"?adminReaderHref(publicId,adminReaderContext):postPath({publicId,slug})} onClick={openReader}>{children}</a>}
     {open&&<Suspense fallback={<ReaderChunkFallback onClose={close}/> }>
-      <ModalPostReader key={activePublicId} initialPublicId={activePublicId} readerScope={readerScope} onEdit={onEdit} onClose={close}/>
+      <ModalPostReader key={`${activePublicId}:${JSON.stringify(activeAdminContext)}`} initialPublicId={activePublicId} readerScope={readerScope} adminReaderContext={activeAdminContext} onEdit={onEdit} onClose={close}/>
     </Suspense>}
   </>;
 }

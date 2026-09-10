@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readApiJson } from "@/app/api-response";
+import type { AdminReaderContext } from "@/domain/reader/admin-reader-context";
 import AdminSpacePicker, { type SpaceChoice } from "./AdminSpacePicker";
 
 type SpaceNode={id:number;parentId:number|null;name:string;slug:string;sortOrder:number;childCount:number;articleCount:number;totalArticleCount?:number;latestActivityAt?:string;childPreview?:string|null;updatedAt:string;path?:PathNode[]};
@@ -11,10 +12,10 @@ type SpacePost={id:number;publicId:string;title:string;slug:string;excerpt:strin
 type DialogState={kind:"create"|"rename"|"move"|"delete";target?:SpaceNode};
 type DialogImpact={descendantCount:number;articleCount:number}|null;
 
-export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false,onCreateArticle,onEditArticle,onBrowseArticle,onShareArticle}:{initialSpaceId?:number|null;createOnOpen?:boolean;onCreateArticle:(spaceId:number,spacePath:string)=>void;onEditArticle:(postId:number)=>void;onBrowseArticle:(postId:number)=>void;onShareArticle:(post:{id:number;title:string})=>void}){
+export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false,onLocationChange,onCreateArticle,onEditArticle,onBrowseArticle,onShareArticle}:{initialSpaceId?:number|null;createOnOpen?:boolean;onLocationChange?:(spaceId:number|null)=>void;onCreateArticle:(spaceId:number,spacePath:string)=>void;onEditArticle:(postId:number)=>void;onBrowseArticle:(postId:number,readerContext:AdminReaderContext)=>void;onShareArticle:(post:{id:number;title:string})=>void}){
   const [roots,setRoots]=useState<SpaceNode[]>([]);
   const [rootMeta,setRootMeta]=useState({rootCount:0,spaceCount:0,articleCount:0});
-  const [currentId,setCurrentId]=useState<number|null>(initialSpaceId);
+  const currentId=initialSpaceId;
   const [overview,setOverview]=useState<Overview|null>(null);
   const [posts,setPosts]=useState<SpacePost[]>([]);
   const [spaceMatches,setSpaceMatches]=useState<SpaceNode[]>([]);
@@ -33,6 +34,10 @@ export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false
   const [treeOpen,setTreeOpen]=useState(false);
   const [dialogImpact,setDialogImpact]=useState<DialogImpact>(null);
   const loadRequest=useRef(0);
+
+  const selectSpace=(spaceId:number|null)=>{
+    onLocationChange?.(spaceId);
+  };
 
   const loadRoots=useCallback(async()=>{
     setLoading(true);
@@ -77,6 +82,7 @@ export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false
   },[loadCurrent,query]);
 
   const pathLabel=overview?.path.map((item)=>item.name).join(" / ")??"";
+  const readerContext:AdminReaderContext=scope==="all"?{range:"private",source:"spaces"}:{range:"space",spaceId:currentId!,includeDescendants:scope==="descendants",source:"spaces"};
   const loadMore=async()=>{
     if(!currentId||!nextCursor||loadingMore)return;
     setLoadingMore(true);
@@ -118,7 +124,7 @@ export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false
     }else return;
     const data=await readApiJson<{error?:string}>(response);
     if(!response.ok){setMessage(data.error??"操作失败");return}
-    if(dialog.kind==="delete"&&target?.id===currentId)setCurrentId(target.parentId);
+    if(dialog.kind==="delete"&&target?.id===currentId)selectSpace(target.parentId);
     setDialog(null);setMessage("");
     await Promise.all([loadRoots(),loadCurrent()]);
   };
@@ -127,7 +133,7 @@ export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false
   if(!currentId)return <section className="admin-main spaces-root">
     <header className="admin-header"><div><p>PRIVATE KNOWLEDGE</p><h1>知识空间</h1><span>顶级空间彼此独立，只承载私有知识入口。</span></div><button className="new-button" onClick={()=>beginDialog("create")}>＋ 新建顶级空间</button></header>
     <div className="spaces-root-summary"><span>{rootMeta.rootCount} 个顶级空间 · {rootMeta.articleCount} 篇私有文章</span><i/><span>{rootMeta.spaceCount} 个空间节点</span><i/>空间文章不会进入首页或公开归档</div>
-    <div className="space-domain-grid">{roots.map((space)=><article className="space-domain-card" key={space.id} onClick={()=>setCurrentId(space.id)}>
+    <div className="space-domain-grid">{roots.map((space)=><article className="space-domain-card" key={space.id} onClick={()=>selectSpace(space.id)}>
       <div><i/><span>{space.childCount} 个子空间</span><SpaceActions space={space} onAction={beginDialog}/></div>
       <h2>{space.name}</h2><p>{space.childPreview||"尚未创建子空间"} · {space.totalArticleCount??space.articleCount} 篇知识文章</p><footer><span>最近更新 {new Date(space.latestActivityAt??space.updatedAt).toLocaleDateString("zh-CN")}</span><b>进入空间 ↗</b></footer>
     </article>)}</div>
@@ -136,15 +142,15 @@ export default function AdminSpacesPanel({initialSpaceId=null,createOnOpen=false
   </section>;
 
   return <section className="admin-main spaces-page">
-    <header className="admin-header space-page-header"><div><button className="space-back" onClick={()=>setCurrentId(overview?.parentId??null)}>←</button><p>PRIVATE KNOWLEDGE</p><h1>{overview?.name??"知识空间"}</h1><SpaceBreadcrumb path={overview?.path??[]} onSelect={setCurrentId}/></div><div className="space-header-actions"><button className="space-mobile-tree-toggle" onClick={()=>setTreeOpen(true)}>☰ 空间路径</button><button onClick={()=>beginDialog("create")}>＋ 子空间</button><button className="new-button" onClick={()=>overview&&onCreateArticle(overview.id,pathLabel)}>＋ 新建文章</button>{currentActions&&<SpaceActions space={currentActions} onAction={beginDialog}/>}</div></header>
+    <header className="admin-header space-page-header"><div><button className="space-back" onClick={()=>selectSpace(overview?.parentId??null)}>←</button><p>PRIVATE KNOWLEDGE</p><h1>{overview?.name??"知识空间"}</h1><SpaceBreadcrumb path={overview?.path??[]} onSelect={selectSpace}/></div><div className="space-header-actions"><button className="space-mobile-tree-toggle" onClick={()=>setTreeOpen(true)}>☰ 空间路径</button><button onClick={()=>beginDialog("create")}>＋ 子空间</button><button className="new-button" onClick={()=>overview&&onCreateArticle(overview.id,pathLabel)}>＋ 新建文章</button>{currentActions&&<SpaceActions space={currentActions} onAction={beginDialog}/>}</div></header>
     <div className="space-workbench">
       {treeOpen&&<button className="space-tree-mobile-backdrop" aria-label="关闭空间树" onClick={()=>setTreeOpen(false)}/>}
-      <aside className={`space-tree-panel ${treeOpen?"mobile-open":""}`}><div><b>知识空间</b><button onClick={()=>{setCurrentId(null);setTreeOpen(false)}}>全部</button></div><label><span>⌕</span><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索空间或文章"/></label><div className="space-search-kind"><button className={searchKind==="all"?"active":""} onClick={()=>setSearchKind("all")}>全部</button><button className={searchKind==="spaces"?"active":""} onClick={()=>setSearchKind("spaces")}>空间</button><button className={searchKind==="articles"?"active":""} onClick={()=>setSearchKind("articles")}>正文</button></div><nav>{query&&spaceMatches.length>0&&<div className="space-tree-search-results"><small>空间</small>{spaceMatches.map((space)=><button key={space.id} onClick={()=>{setCurrentId(space.id);setQuery("");setTreeOpen(false)}}><b>{space.name}</b><span>{space.path?.map((item)=>item.name).join(" / ")}</span></button>)}<small>空间树</small></div>}{roots.map((space)=><SpaceTreeNode key={space.id} node={space} currentId={currentId} activePathIds={overview?.path.map((item)=>item.id)??[]} onSelect={(id)=>{setCurrentId(id);setTreeOpen(false)}}/>)}</nav></aside>
+      <aside className={`space-tree-panel ${treeOpen?"mobile-open":""}`}><div><b>知识空间</b><button onClick={()=>{selectSpace(null);setTreeOpen(false)}}>全部</button></div><label><span>⌕</span><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索空间或文章"/></label><div className="space-search-kind"><button className={searchKind==="all"?"active":""} onClick={()=>setSearchKind("all")}>全部</button><button className={searchKind==="spaces"?"active":""} onClick={()=>setSearchKind("spaces")}>空间</button><button className={searchKind==="articles"?"active":""} onClick={()=>setSearchKind("articles")}>正文</button></div><nav>{query&&spaceMatches.length>0&&<div className="space-tree-search-results"><small>空间</small>{spaceMatches.map((space)=><button key={space.id} onClick={()=>{selectSpace(space.id);setQuery("");setTreeOpen(false)}}><b>{space.name}</b><span>{space.path?.map((item)=>item.name).join(" / ")}</span></button>)}<small>空间树</small></div>}{roots.map((space)=><SpaceTreeNode key={space.id} node={space} currentId={currentId} activePathIds={overview?.path.map((item)=>item.id)??[]} onSelect={(id)=>{selectSpace(id);setTreeOpen(false)}}/>)}</nav></aside>
       <div className="space-content">
         <div className="space-content-intro"><div><span>{overview?.children.length??0} 个直属子空间 · {overview?.articleCount??0} 篇知识文章</span><p>{pathLabel}</p></div><div className="space-scope"><button className={scope==="current"?"active":""} onClick={()=>setScope("current")}>仅当前空间</button><button className={scope==="descendants"?"active":""} onClick={()=>setScope("descendants")}>包含子空间</button><button className={scope==="all"?"active":""} onClick={()=>setScope("all")}>全部空间</button></div></div>
-        {!!overview?.children.length&&<><div className="space-section-heading"><b>子空间</b><span>只展示当前层级</span></div><div className="space-child-grid">{overview.children.map((space)=><article key={space.id} onClick={()=>setCurrentId(space.id)}><div><i/><SpaceActions space={space} onAction={beginDialog}/></div><h3>{space.name}</h3><p>{pathLabel} / {space.name}</p><footer>{space.childCount} 个子空间 · {space.articleCount} 篇文章 <b>↗</b></footer></article>)}</div></>}
+        {!!overview?.children.length&&<><div className="space-section-heading"><b>子空间</b><span>只展示当前层级</span></div><div className="space-child-grid">{overview.children.map((space)=><article key={space.id} onClick={()=>selectSpace(space.id)}><div><i/><SpaceActions space={space} onAction={beginDialog}/></div><h3>{space.name}</h3><p>{pathLabel} / {space.name}</p><footer>{space.childCount} 个子空间 · {space.articleCount} 篇文章 <b>↗</b></footer></article>)}</div></>}
         <div className="space-section-heading"><b>{scope==="current"?"直属文章":scope==="descendants"?"空间内文章":"全部私有文章"}</b><span>{query?`搜索“${query}”`:"按最近更新排序"}</span></div>
-        <div className="space-article-list">{loading?<p className="space-loading">正在读取空间内容…</p>:posts.map((post)=><article key={post.id}><time>{new Date(post.updatedAt).toLocaleDateString("zh-CN",{month:"2-digit",day:"2-digit"})}</time><div><small>{post.categoryName} · {post.status==="published"?"内容完成":"草稿"}</small><b>{post.title}</b><p>{post.spacePath||post.excerpt||"暂无摘要"}</p></div><div><button onClick={()=>onBrowseArticle(post.id)}>浏览</button><button onClick={()=>onShareArticle(post)}>分享</button><button onClick={()=>onEditArticle(post.id)}>编辑 ↗</button></div></article>)}{!loading&&!posts.length&&<div className="space-empty compact"><h3>{query&&searchKind==="spaces"?"正在按空间名称搜索":"这个空间还很安静"}</h3><p>{query?(searchKind==="spaces"?"匹配空间显示在左侧，正文列表保持隐藏。":"没有找到匹配文章"):"可以创建子空间，或从这里开始写第一篇知识文章。"}</p></div>}{!loading&&nextCursor&&<button className="space-load-more" onClick={()=>void loadMore()} disabled={loadingMore}>{loadingMore?"正在加载…":"继续加载"}</button>}</div>
+        <div className="space-article-list">{loading?<p className="space-loading">正在读取空间内容…</p>:posts.map((post)=><article key={post.id}><time>{new Date(post.updatedAt).toLocaleDateString("zh-CN",{month:"2-digit",day:"2-digit"})}</time><div><small>{post.categoryName} · {post.status==="published"?"内容完成":"草稿"}</small><b>{post.title}</b><p>{post.spacePath||post.excerpt||"暂无摘要"}</p></div><div><button onClick={()=>onBrowseArticle(post.id,readerContext)}>浏览</button><button onClick={()=>onShareArticle(post)}>分享</button><button onClick={()=>onEditArticle(post.id)}>编辑 ↗</button></div></article>)}{!loading&&!posts.length&&<div className="space-empty compact"><h3>{query&&searchKind==="spaces"?"正在按空间名称搜索":"这个空间还很安静"}</h3><p>{query?(searchKind==="spaces"?"匹配空间显示在左侧，正文列表保持隐藏。":"没有找到匹配文章"):"可以创建子空间，或从这里开始写第一篇知识文章。"}</p></div>}{!loading&&nextCursor&&<button className="space-load-more" onClick={()=>void loadMore()} disabled={loadingMore}>{loadingMore?"正在加载…":"继续加载"}</button>}</div>
       </div>
     </div>
     {dialog&&<SpaceDialog dialog={dialog} impact={dialogImpact} name={name} setName={setName} moveTarget={moveTarget} setMoveTarget={setMoveTarget} deleteMode={deleteMode} setDeleteMode={setDeleteMode} confirmName={confirmName} setConfirmName={setConfirmName} message={message} onClose={()=>setDialog(null)} onSubmit={submitDialog}/>}

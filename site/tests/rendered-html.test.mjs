@@ -4,6 +4,18 @@ import test from "node:test";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const clientManifest = async () => JSON.parse(await source("dist/client/.vite/manifest.json"));
+const clientStyles = async () => {
+  const candidates = ["dist/client/assets/", "dist/client/_next/static/css/"];
+  for (const path of candidates) {
+    const directory = new URL(`../${path}`, import.meta.url);
+    try {
+      return { directory, files: await readdir(directory) };
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  assert.fail("client stylesheet directory is missing");
+};
 const mcpSource = async () => (await Promise.all([
   source("worker/blog-mcp.ts"),
   source("worker/mcp/read-tools.ts"),
@@ -133,6 +145,7 @@ test("remote MCP separates read approvals from important writes and records rece
     source("db/mcp-activity.ts"),
   ]);
   assert.match(mcp, /server\.registerTool\("list_mcp_activity"/);
+  assert.match(mcp, /activityReceipt\("upload_attachment"/);
   assert.match(mcp, /server\.registerTool\("get_page"/);
   assert.match(mcp, /server\.registerTool\("update_page"/);
   assert.match(mcp, /change_summary: CHANGE_SUMMARY_SCHEMA/);
@@ -166,8 +179,8 @@ test("public entry keeps rich reading assets behind interaction boundaries", asy
   const [manifest, viteConfig] = await Promise.all([clientManifest(), source("vite.config.ts")]);
   const modalLink = manifest["features/reader/ModalPostLink.tsx"];
   const katexEntry = Object.values(manifest).find((entry) => entry.name === "MarkdownKatexStyles");
-  const mainCss = (await readdir(new URL("../dist/client/assets/", import.meta.url)))
-    .find((name) => /^index-.+\.css$/.test(name));
+  const { directory: stylesDirectory, files: styleFiles } = await clientStyles();
+  const mainCss = styleFiles.find((name) => /^index[.-].+\.css$/.test(name));
 
   assert.ok(modalLink, "ModalPostLink client chunk is missing");
   assert.deepEqual(modalLink.dynamicImports, ["features/reader/ModalPostReader.tsx"]);
@@ -176,7 +189,7 @@ test("public entry keeps rich reading assets behind interaction boundaries", asy
   assert.match(viteConfig, /xingyu-katex-font-display/);
   assert.match(viteConfig, /replaceAll\("font-display:block", "font-display:swap"\)/);
   assert.ok(mainCss, "main public stylesheet is missing");
-  const mainCssSize = (await stat(new URL(`../dist/client/assets/${mainCss}`, import.meta.url))).size;
+  const mainCssSize = (await stat(new URL(mainCss, stylesDirectory))).size;
   assert.ok(mainCssSize <= 270_000, `main public stylesheet exceeded 270 KB: ${mainCssSize} bytes`);
 });
 
@@ -295,6 +308,10 @@ test("admin and markdown editor share the site theme palette", async () => {
   assert.match(styles,/--panel-background-color:var\(--admin-panel\)/);
   assert.match(styles,/The admin navigation belongs to the active appearance/);
   assert.match(styles,/html\[data-theme="dark"\] \.admin-sidebar/);
+  assert.match(adminStyles,/\.editor-backdrop \{ position:fixed; z-index:110/);
+  assert.match(adminStyles,/\.editor-panel\{height:100dvh\}/);
+  assert.match(publicStyles,/\.reader-layout,\.reader-layout \.reader-panel\{height:100dvh;min-height:100dvh\}/);
+  assert.match(publicStyles,/\.island-search-results\{max-height:min\(430px,calc\(100dvh - 84px\)\)\}/);
   assert.match(editor,/vditor--dark/);
   assert.match(editor,/MutationObserver/);
   assert.match(editor,/vditorMermaidScript/);
@@ -318,7 +335,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "11"/);
+  assert.match(bootstrap,/schemaVersion = "12"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -397,24 +414,36 @@ test("admin global search covers every article through the shared authenticated 
   assert.doesNotMatch(admin,/setForm\(data\.post\);setStudio\("reading"\)/);
   assert.match(browse,/<BlogHomeExperience/);
   assert.match(homeExperience,/readerScope=\{admin\?"admin":"public"\}/);
-  assert.match(modalReader,/scope=admin/);
+  assert.match(modalReader,/adminReaderSearchParams\(activeAdminReaderContext\)/);
+  assert.match(modalReader,/adminReaderHref\(post\.publicId,activeAdminReaderContext\)/);
+  assert.match(modalReader,/setActiveAdminReaderContext\(DEFAULT_ADMIN_READER_CONTEXT\)/);
+  assert.match(modalReader,/onEdit\(post\.id,\{publicId:post\.publicId,adminReaderContext:activeAdminReaderContext\}\)/);
   assert.match(modalLink,/xingyu:admin-reader-open/);
   assert.match(modalReader,/管理阅读/);
   assert.match(modalReader,/独立阅读/);
   assert.match(modalReader,/event\.key\.toLocaleLowerCase\(\) === "e"/);
   assert.match(readerApi,/isAdminRequest/);
   assert.match(readerApi,/getAdminReaderPost/);
+  assert.match(readerApi,/parseAdminReaderContext/);
+  assert.match(readerApi,/getPreviousAdminPost\([^;]+readerContext\)/);
+  assert.match(readerApi,/getNextAdminPost\([^;]+readerContext\)/);
   assert.match(readerPage,/getAdminIdentity/);
   assert.match(readerPage,/readerScope="admin"/);
   assert.match(postView,/getPreviousAdminPost/);
   assert.match(postView,/getNextAdminPost/);
+  assert.match(admin,/readerReturnRef/);
+  assert.match(admin,/if\(returnTarget\)openAdminReader\(returnTarget\)/);
+  assert.match(admin,/window\.scrollTo\(0,0\)/);
+  assert.match(admin,/addEventListener\("popstate",restoreLocation\)/);
+  assert.match(admin,/adminLocationHref\(next\)/);
 });
 
 test("attachments inherit article visibility and are available to editors and MCP", async () => {
-  const [schema, bootstrap, attachments, uploadRoute, downloadRoute, mediaRoute, renderer, editor, mcp, wrangler] = await Promise.all([
+  const [schema, bootstrap, attachments, attachmentCache, uploadRoute, downloadRoute, mediaRoute, renderer, editor, mcp, wrangler] = await Promise.all([
     source("db/schema.ts"),
     source("db/bootstrap.ts"),
     source("db/attachments.ts"),
+    source("domain/attachments/http-cache.ts"),
     source("app/api/attachments/route.ts"),
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
     source("app/api/media/[...key]/route.ts"),
@@ -430,8 +459,10 @@ test("attachments inherit article visibility and are available to editors and MC
   assert.match(uploadRoute, /isAdminRequest/);
   assert.match(downloadRoute, /postStatus === "published" && attachment\.postSpaceId === null/);
   assert.match(downloadRoute, /env\.IMAGES/);
-  assert.match(downloadRoute, /private, no-store/);
-  assert.match(downloadRoute, /public, max-age=0, s-maxage=60/);
+  assert.match(attachmentCache, /private, no-store/);
+  assert.match(attachmentCache, /public, max-age=0, must-revalidate/);
+  assert.match(downloadRoute, /attachmentEtagMatches\(request\.headers\.get\("If-None-Match"\)/);
+  assert.doesNotMatch(`${attachmentCache}\n${downloadRoute}`, /s-maxage=60/);
   assert.match(mediaRoute, /output\(\{ format: "image\/webp", quality: 82 \}\)/);
   assert.match(renderer, /srcSet/);
   assert.match(renderer, /responsiveImageWidths/);

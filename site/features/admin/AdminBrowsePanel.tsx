@@ -5,13 +5,18 @@ import BlogHomeExperience, { type BlogHomePost } from "@/features/home/BlogHomeE
 import { readApiJson } from "@/app/api-response";
 import type { SiteSettingsForm } from "./AdminSettingsPanel";
 import type { AdminCategory, AdminStats } from "./admin-types";
+import type { AdminBrowseVisibility } from "@/domain/admin/location";
 
-type Visibility="all"|"public"|"private";
+export type { AdminBrowseVisibility } from "@/domain/admin/location";
 
 export default function AdminBrowsePanel({
   settings,
   categories,
   stats,
+  category,
+  visibility,
+  onCategoryChange,
+  onVisibilityChange,
   onEdit,
   onWrite,
   onOpenArticles,
@@ -20,14 +25,16 @@ export default function AdminBrowsePanel({
   settings:SiteSettingsForm;
   categories:AdminCategory[];
   stats:AdminStats;
+  category:string;
+  visibility:AdminBrowseVisibility;
+  onCategoryChange:(category:string)=>void;
+  onVisibilityChange:(visibility:AdminBrowseVisibility)=>void;
   onEdit:(postId:number)=>void;
   onWrite:()=>void;
   onOpenArticles:()=>void;
   onOpenSpaces:(spaceId?:number)=>void;
 }){
   const [posts,setPosts]=useState<BlogHomePost[]>([]);
-  const [category,setCategory]=useState("all");
-  const [visibility,setVisibility]=useState<Visibility>("all");
   const [loading,setLoading]=useState(true);
 
   const load=useCallback(async(signal:AbortSignal)=>{
@@ -67,8 +74,8 @@ export default function AdminBrowsePanel({
       posts={posts}
       selectedCategory={category}
       visibility={visibility}
-      onCategoryChange={setCategory}
-      onVisibilityChange={setVisibility}
+      onCategoryChange={onCategoryChange}
+      onVisibilityChange={onVisibilityChange}
       onEdit={onEdit}
       onWrite={onWrite}
       onOpenArticles={onOpenArticles}

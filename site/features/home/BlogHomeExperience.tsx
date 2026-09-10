@@ -71,6 +71,7 @@ export default function BlogHomeExperience({
   const heroLength=Math.max(Array.from(settings.heroLead).length,Array.from(settings.heroTail).length);
   const heroDensity=heroLength>15?" dense":heroLength>10?" compact":"";
   const selected=categories.find((item)=>item.slug===selectedCategory);
+  const adminReaderContext={range:visibility,category:selectedCategory,status:"all",source:"browse"} as const;
   const [featured,...rest]=posts;
 
   const categoryControl=(item:BlogCategory|null)=>{
@@ -83,7 +84,7 @@ export default function BlogHomeExperience({
   };
 
   const card=(post:BlogHomePost,index:number,featuredCard=false)=><div className={`shared-post-card${featuredCard?" featured":""}${admin?" admin-card":""}`} key={post.id}>
-    <ModalPostLink readerScope={admin?"admin":"public"} className={`post-card${featuredCard?" featured":index%3===1?" dark":""}`} publicId={post.publicId} slug={post.slug} onEdit={onEdit}>
+    <ModalPostLink readerScope={admin?"admin":"public"} adminReaderContext={admin?adminReaderContext:undefined} className={`post-card${featuredCard?" featured":index%3===1?" dark":""}`} publicId={post.publicId} slug={post.slug} onEdit={onEdit}>
       <div className="card-copy">
         <span className="post-category" style={{"--post-category-color":post.categoryColor??"#0071e3"} as CSSProperties}>{admin?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span>
         <h3>{post.title}</h3><p>{post.excerpt}</p>

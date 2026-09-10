@@ -5,6 +5,7 @@ import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
 import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
+import { adminReaderSqlFilter, type AdminReaderContext } from "@/domain/reader/admin-reader-context";
 
 export type PostFilters = {
   page?: number;
@@ -189,23 +190,24 @@ export async function getAdminReaderPost(identifier:string){
     .bind(identifier,identifier).first<AdminReaderPost>();
 }
 
-export async function getPreviousAdminPost(updatedAt:string,id:number){
-  return getAdjacentAdminPost(updatedAt,id,"newer");
+export async function getPreviousAdminPost(updatedAt:string,id:number,readerContext?:AdminReaderContext){
+  return getAdjacentAdminPost(updatedAt,id,"newer",readerContext);
 }
 
-export async function getNextAdminPost(updatedAt:string,id:number){
-  return getAdjacentAdminPost(updatedAt,id,"older");
+export async function getNextAdminPost(updatedAt:string,id:number,readerContext?:AdminReaderContext){
+  return getAdjacentAdminPost(updatedAt,id,"older",readerContext);
 }
 
-async function getAdjacentAdminPost(updatedAt:string,id:number,direction:"older"|"newer"){
+async function getAdjacentAdminPost(updatedAt:string,id:number,direction:"older"|"newer",readerContext?:AdminReaderContext){
   await ensureDatabase();
   const older=direction==="older";
   const operator=older?"<":">";
   const order=older?"DESC":"ASC";
+  const filter=adminReaderSqlFilter(readerContext);
   return await env.DB.prepare(`${adminReaderSelection}
-    WHERE p.updated_at ${operator} ? OR (p.updated_at=? AND p.id ${operator} ?)
+    WHERE (p.updated_at ${operator} ? OR (p.updated_at=? AND p.id ${operator} ?))${filter.sql}
     ORDER BY p.updated_at ${order},p.id ${order} LIMIT 1`)
-    .bind(updatedAt,updatedAt,id).first<AdminReaderPost>();
+    .bind(updatedAt,updatedAt,id,...filter.bindings).first<AdminReaderPost>();
 }
 
 const adjacentPostSelection = {

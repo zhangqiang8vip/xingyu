@@ -1,4 +1,4 @@
-export type AdminSection="browse"|"home"|"articles"|"spaces"|"connect"|"integrations"|"about"|"categories";
+export type { AdminSection } from "@/domain/admin/location";
 
 export type AdminMcpSession = {
   subject: string;

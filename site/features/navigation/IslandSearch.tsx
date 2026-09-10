@@ -5,6 +5,7 @@ import { transitionTo } from "@/app/RouteTransition";
 import { CONTENT_LIMITS } from "@/domain/site/config";
 import { formatShortDate, isEditableTarget } from "@/app/content-utils";
 import { postPath } from "@/app/post-path";
+import { visibleIslandSearchRows } from "@/domain/navigation/search-results";
 
 export type SearchPost = { id:number; publicId:string; title:string; slug:string; excerpt:string; publishedAt:string | null; viewCount:number; categoryName:string | null; categoryColor:string | null; status?:"draft"|"published";spaceId?:number|null;spacePath?:string|null };
 
@@ -79,7 +80,7 @@ export default function IslandSearch({ initialText, excludeSlug, onSelect, varia
         const response = await fetch(endpoint, { signal:controller.signal });
         if (!response.ok) throw new Error("search failed");
         const data = await response.json() as { rows: SearchPost[] };
-        setRows(excludeSlug ? data.rows.filter((row) => row.slug !== excludeSlug) : data.rows);
+        setRows(visibleIslandSearchRows(data.rows,excludeSlug,query));
         setSelected(0); setHoveredSlug(null);
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) setRows([]);

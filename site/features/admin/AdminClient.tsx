@@ -11,7 +11,7 @@ import AdminIntegrationsPanel from "./AdminIntegrationsPanel";
 import AdminSpacesPanel from "./AdminSpacesPanel";
 import ArticleWritingStudio, { useSplitScrollSync } from "./ArticleWritingStudio";
 import AdminArticleSearch from "./AdminArticleSearch";
-import AdminBrowsePanel from "./AdminBrowsePanel";
+import AdminBrowsePanel, { type AdminBrowseVisibility } from "./AdminBrowsePanel";
 import AdminArticlesPanel from "./AdminArticlesPanel";
 import AdminSidebar from "./AdminSidebar";
 import AdminArticleEditor from "./AdminArticleEditor";
@@ -19,22 +19,27 @@ import AdminPreviewShareDialog from "./AdminPreviewShareDialog";
 import type { AdminCategory, AdminMcpConnection, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
 import { readApiJson } from "@/app/api-response";
 import ModalPostLink from "@/features/reader/ModalPostLink";
+import type { AdminReaderContext, AdminReaderReturnTarget } from "@/domain/reader/admin-reader-context";
+import { adminLocationHref, parseAdminLocation, type AdminLocation } from "@/domain/admin/location";
 
 const emptyForm = (categoryId = 1,spaceId:number|null=null,spacePath=""): ArticleForm => ({ title: "", slug: "", excerpt: "", content: "", categoryId, spaceId,spacePath,status: "draft", featured: false, publishedAt:null });
+type AdminInitialLocation=AdminLocation;
 
-export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, initialArticle, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; initialArticle:ArticleForm|null; userName: string; signOutPath: string }) {
+export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, initialArticle, initialLocation, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; initialArticle:ArticleForm|null; initialLocation:AdminInitialLocation; userName: string; signOutPath: string }) {
   const articleEditorPreviewRef=useRef<HTMLDivElement>(null);
-  const [section,setSection]=useState<AdminSection>("browse");
-  const [spaceLandingId,setSpaceLandingId]=useState<number|null>(null);
+  const [section,setSection]=useState<AdminSection>(initialLocation.section);
+  const [spaceLandingId,setSpaceLandingId]=useState<number|null>(initialLocation.spaceId);
   const [createSpaceOnOpen,setCreateSpaceOnOpen]=useState(false);
   const [categories,setCategories]=useState(initialCategories);
   const [posts, setPosts] = useState<AdminPost[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [query, setQuery] = useState(initialLocation.query);
+  const [category, setCategory] = useState(initialLocation.category);
+  const [status, setStatus] = useState(initialLocation.status);
+  const [browseCategory,setBrowseCategory]=useState(initialLocation.browseCategory);
+  const [browseVisibility,setBrowseVisibility]=useState<AdminBrowseVisibility>(initialLocation.browseVisibility);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ArticleForm | null>(initialArticle);
   const [message, setMessage] = useState("");
@@ -42,6 +47,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
   const [studio,setStudio]=useState<null|"code"|"split"|"reading">(null);
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
   const [sharePost,setSharePost]=useState<{id:number;title:string}|null>(null);
+  const readerReturnRef=useRef<AdminReaderReturnTarget|null>(null);
   useSplitScrollSync(articleEditorPreviewRef,Boolean(form));
   const selectedFormCategory = form ? categories.find((item) => item.id === form.categoryId) : undefined;
 
@@ -78,6 +84,34 @@ export default function AdminClient({ categories:initialCategories, settings, co
     return()=>window.cancelAnimationFrame(frame);
   },[]);
 
+  useEffect(()=>{
+    // Admin sections are separate workspaces. Reusing the previous document
+    // scroll can hide a new section's heading and actions behind the mobile dock.
+    const frame=window.requestAnimationFrame(()=>window.scrollTo(0,0));
+    return()=>window.cancelAnimationFrame(frame);
+  },[section]);
+
+  useEffect(()=>{
+    const restoreLocation=()=>{
+      const next=parseAdminLocation(new URLSearchParams(window.location.search));
+      setSection(next.section);
+      setBrowseCategory(next.browseCategory);
+      setBrowseVisibility(next.browseVisibility);
+      setQuery(next.query);
+      setCategory(next.category);
+      setStatus(next.status);
+      setSpaceLandingId(next.spaceId);
+      setCreateSpaceOnOpen(false);
+      setCursor(null);
+      setCursorStack([]);
+      setStudio(null);
+      setForm(null);
+      readerReturnRef.current=null;
+    };
+    window.addEventListener("popstate",restoreLocation);
+    return()=>window.removeEventListener("popstate",restoreLocation);
+  },[]);
+
   function toggleSidebar(){
     setSidebarCollapsed((current)=>{
       const next=!current;
@@ -91,12 +125,25 @@ export default function AdminClient({ categories:initialCategories, settings, co
     setCursorStack([]);
   }
 
+  function currentLocation(overrides:Partial<AdminLocation>={}):AdminLocation{
+    return {section,browseCategory,browseVisibility,query,category,status:status as AdminLocation["status"],spaceId:spaceLandingId,...overrides};
+  }
+
+  function writeLocation(next:AdminLocation,mode:"push"|"replace"="replace"){
+    window.history[mode==="push"?"pushState":"replaceState"](null,"",adminLocationHref(next));
+  }
+
   function closeEditor() {
+    const returnTarget=readerReturnRef.current;
+    readerReturnRef.current=null;
     setStudio(null);
     setForm(null);
+    writeLocation(currentLocation());
+    if(returnTarget)window.requestAnimationFrame(()=>openAdminReader(returnTarget));
   }
 
   function openNewArticle(spaceId:number|null=null,spacePath="") {
+    readerReturnRef.current=null;
     setStudio(null);
     setForm(emptyForm(categories[0]?.id,spaceId,spacePath));
     setMessage("");
@@ -121,7 +168,12 @@ export default function AdminClient({ categories:initialCategories, settings, co
     });
     const data = await readApiJson<{post:ArticleForm}>(response);
     if (!response.ok) return setMessage(data.error ?? "保存失败");
-    setMessage("保存成功"); closeEditor(); await Promise.all([load(), loadStats()]);
+    const returnTarget=readerReturnRef.current;
+    readerReturnRef.current=null;
+    setMessage("保存成功"); setStudio(null); setForm(null);
+    writeLocation(currentLocation());
+    await Promise.all([load(), loadStats()]);
+    if(returnTarget)openAdminReader(returnTarget);
   }
 
   async function loadArticle(postId:number){
@@ -130,16 +182,20 @@ export default function AdminClient({ categories:initialCategories, settings, co
     return response.ok?data.post:null;
   }
 
-  async function editById(postId:number){
+  async function editById(postId:number,returnTarget?:AdminReaderReturnTarget){
     const article=await loadArticle(postId);
-    if(article){setStudio(null);setForm(article);setMessage("")}
+    if(article){readerReturnRef.current=returnTarget??null;setStudio(null);setForm(article);setMessage("")}
   }
 
-  async function browseById(postId:number){
+  function openAdminReader(target:AdminReaderReturnTarget){
+    window.dispatchEvent(new CustomEvent("xingyu:admin-reader-open",{detail:target}));
+  }
+
+  async function browseById(postId:number,adminReaderContext?:AdminReaderContext){
     const article=await loadArticle(postId);
     if(!article)return setMessage("文章暂时无法打开，请稍后再试");
     setStudio(null);setForm(null);setMessage("");
-    window.dispatchEvent(new CustomEvent("xingyu:admin-reader-open",{detail:{publicId:article.publicId}}));
+    window.dispatchEvent(new CustomEvent("xingyu:admin-reader-open",{detail:{publicId:article.publicId,adminReaderContext}}));
   }
 
   function changeSpace(choice:{id:number;name:string;path?:Array<{id:number;name:string}>}|null){
@@ -174,11 +230,52 @@ export default function AdminClient({ categories:initialCategories, settings, co
   }
 
   function changeSection(next:AdminSection){
+    if(next===section)return;
+    const nextSpaceId=next==="spaces"?null:spaceLandingId;
     if(next==="spaces"){
       setCreateSpaceOnOpen(false);
       setSpaceLandingId(null);
     }
     setSection(next);
+    writeLocation(currentLocation({section:next,spaceId:nextSpaceId}),"push");
+  }
+
+  function openSpaces(spaceId:number|null=null){
+    setCreateSpaceOnOpen(false);
+    setSpaceLandingId(spaceId);
+    setSection("spaces");
+    writeLocation(currentLocation({section:"spaces",spaceId}),"push");
+  }
+
+  function changeBrowseCategory(value:string){
+    setBrowseCategory(value);
+    writeLocation(currentLocation({browseCategory:value}));
+  }
+
+  function changeBrowseVisibility(value:AdminBrowseVisibility){
+    setBrowseVisibility(value);
+    writeLocation(currentLocation({browseVisibility:value}));
+  }
+
+  function changeArticleQuery(value:string){
+    setQuery(value);resetCursor();
+    writeLocation(currentLocation({query:value}));
+  }
+
+  function changeArticleCategory(value:string){
+    setCategory(value);resetCursor();
+    writeLocation(currentLocation({category:value}));
+  }
+
+  function changeArticleStatus(value:string){
+    const next:AdminLocation["status"]=value==="draft"||value==="published"?value:"all";
+    setStatus(next);resetCursor();
+    writeLocation(currentLocation({status:next}));
+  }
+
+  function changeSpaceLocation(spaceId:number|null){
+    setSpaceLandingId(spaceId);
+    if(section==="spaces")writeLocation(currentLocation({spaceId}));
   }
 
   return (
@@ -188,12 +285,12 @@ export default function AdminClient({ categories:initialCategories, settings, co
         <div className="admin-workspace-bar">
           <AdminArticleSearch disabled={Boolean(form||studio)} articleCount={stats.total+stats.privateArticles} onBrowse={(postId)=>void browseById(postId)}/>
         </div>
-      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>setSection("articles")} onOpenSpaces={(spaceId)=>{setCreateSpaceOnOpen(false);setSpaceLandingId(spaceId??null);setSection("spaces")}} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={(value)=>{setQuery(value);resetCursor()}} onCategoryChange={(value)=>{setCategory(value);resetCursor()}} onStatusChange={(value)=>{setStatus(value);resetCursor()}} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId)} onShare={setSharePost} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId)=>void browseById(postId)} onShareArticle={setSharePost} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="integrations" ? <AdminIntegrationsPanel initial={connections} /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
+      {section==="browse" ? <AdminBrowsePanel settings={settings} categories={categories} stats={stats} category={browseCategory} visibility={browseVisibility} onCategoryChange={changeBrowseCategory} onVisibilityChange={changeBrowseVisibility} onEdit={(postId)=>void editById(postId)} onWrite={()=>openNewArticle()} onOpenArticles={()=>changeSection("articles")} onOpenSpaces={(spaceId)=>openSpaces(spaceId??null)} /> : section==="home" ? <AdminSettingsPanel initial={settings} /> : section==="articles" ? <AdminArticlesPanel brandName={settings.brandName} stats={stats} posts={posts} categories={categories} loading={loading} query={query} category={category} status={status} batch={cursorStack.length+1} hasPrevious={cursorStack.length>0} hasNext={Boolean(nextCursor)} onQueryChange={changeArticleQuery} onCategoryChange={changeArticleCategory} onStatusChange={changeArticleStatus} onNew={()=>openNewArticle()} onBrowse={(postId)=>void browseById(postId,{range:"all",query,category,status:status as "all"|"draft"|"published",source:"articles"})} onShare={setSharePost} onEdit={(postId)=>void editById(postId)} onRemove={(post)=>void remove(post)} onPrevious={previousBatch} onNext={nextBatch}/> : section==="spaces" ? <AdminSpacesPanel initialSpaceId={spaceLandingId} createOnOpen={createSpaceOnOpen} onLocationChange={changeSpaceLocation} onCreateArticle={(spaceId,spacePath)=>openNewArticle(spaceId,spacePath)} onEditArticle={(postId)=>void editById(postId)} onBrowseArticle={(postId,readerContext)=>void browseById(postId,readerContext)} onShareArticle={setSharePost} /> : section==="connect" ? <AdminPageEditor initial={connectPage} settings={settings} kind="connect" label="接入" /> : section==="integrations" ? <AdminIntegrationsPanel initial={connections} /> : section==="about" ? <AdminPageEditor initial={aboutPage} settings={settings} kind="about" label="关于" /> : <AdminCategoriesPanel initial={categories} onChange={setCategories} />}
       </div>
 
       {form&&<AdminArticleEditor form={form} category={selectedFormCategory} categories={categories} settings={settings} message={message} previewRef={articleEditorPreviewRef} onChange={setForm} onChangeSpace={changeSpace} onClose={closeEditor} onOpenStudio={setStudio} onSharePreview={form.id?()=>setSharePost({id:form.id!,title:form.title}):undefined} onSave={save}/>}
       {form&&studio&&<ArticleWritingStudio draft={form} categoryName={selectedFormCategory?.name??"随笔"} categoryColor={selectedFormCategory?.color??"#8E8E93"} authorName={settings.authorName} avatarUrl={settings.avatarUrl} initialMode={studio} onChange={(content)=>setForm(current=>current?{...current,content}:current)} onClose={()=>setStudio(null)}/>}
-      <ModalPostLink controllerOnly readerScope="admin" publicId="" slug="" onEdit={(postId)=>void editById(postId)}/>
+      <ModalPostLink controllerOnly readerScope="admin" publicId="" slug="" onEdit={(postId,returnTarget)=>void editById(postId,returnTarget)}/>
       {sharePost&&<AdminPreviewShareDialog post={sharePost} onClose={()=>setSharePost(null)}/>}
     </main>
   );

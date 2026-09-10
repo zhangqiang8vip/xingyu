@@ -927,6 +927,7 @@ html[data-theme="dark"] .apple-scroll-indicator.active .apple-scroll-thumb,html[
 }
 @media print{.apple-scroll-indicator{display:none}}
 
+
 /* Search that expands from the navigation island. */
 .site-nav nav{overflow:visible}
 .site-nav nav>.island-search{position:absolute}
@@ -2263,4 +2264,13 @@ html[data-theme="dark"] .reader-admin-context{color:#9999a1;border-color:rgba(25
   .article-pure-preview>header{padding:0 10px}
   .article-pure-preview>header span,.article-pure-preview>header small{display:none}
   .article-pure-preview>header b{max-width:60vw}
+}
+
+/* Keep full-screen reading and search controls inside the visual viewport when
+   a phone keyboard or browser chrome changes the available height. */
+@media(max-width:700px){
+  .reader-layout,.reader-layout .reader-panel{height:100dvh;min-height:100dvh}
+  .reader-layout .reader-toc{max-height:calc(100dvh - 125px)}
+  .reader-toolbar>.reader-search .island-search-results{max-height:min(330px,calc(100dvh - 270px))}
+  .island-search-results{max-height:min(430px,calc(100dvh - 84px))}
 }

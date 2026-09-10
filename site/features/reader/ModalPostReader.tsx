@@ -6,6 +6,7 @@ import ArticleEndMark from "./ArticleEndMark";
 import IslandSearch from "@/features/navigation/IslandSearch";
 import { formatLongDate, isEditableTarget } from "@/app/content-utils";
 import MarkdownRenderer from "@/features/markdown/MarkdownRenderer";
+import { adminReaderHref, adminReaderSearchParams, DEFAULT_ADMIN_READER_CONTEXT, normalizeAdminReaderContext, type AdminReaderContext, type AdminReaderReturnTarget } from "@/domain/reader/admin-reader-context";
 
 type ReaderPost = {
   id: number;
@@ -33,12 +34,14 @@ type ReaderResponse = {
 type Props = {
   initialPublicId:string;
   readerScope?:"public"|"admin";
-  onEdit?:(postId:number)=>void;
+  adminReaderContext?:AdminReaderContext;
+  onEdit?:(postId:number,returnTarget?:AdminReaderReturnTarget)=>void;
   onClose:()=>void;
 };
 
-export default function ModalPostReader({ initialPublicId, readerScope="public", onEdit, onClose }: Props) {
+export default function ModalPostReader({ initialPublicId, readerScope="public", adminReaderContext, onEdit, onClose }: Props) {
   const [activePublicId, setActivePublicId] = useState(initialPublicId);
+  const [activeAdminReaderContext,setActiveAdminReaderContext]=useState(()=>normalizeAdminReaderContext(adminReaderContext));
   const [post, setPost] = useState<ReaderPost | null>(null);
   const [previousPost, setPreviousPost] = useState<ReaderNeighbor | null>(null);
   const [nextPost, setNextPost] = useState<ReaderNeighbor | null>(null);
@@ -96,7 +99,7 @@ export default function ModalPostReader({ initialPublicId, readerScope="public",
 
   useEffect(() => {
     const controller = new AbortController();
-    const scope=readerScope==="admin"?"?scope=admin":"";
+    const scope=readerScope==="admin"?`?${adminReaderSearchParams(activeAdminReaderContext)}`:"";
     fetch(`/api/reader/${encodeURIComponent(activePublicId)}${scope}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("读取失败");
@@ -110,7 +113,7 @@ export default function ModalPostReader({ initialPublicId, readerScope="public",
         if (!(nextError instanceof DOMException && nextError.name === "AbortError")) setError("文章暂时无法打开，请稍后再试。");
       });
     return () => controller.abort();
-  }, [activePublicId, readerScope]);
+  }, [activeAdminReaderContext, activePublicId, readerScope]);
 
   useEffect(() => {
     const body = document.body;
@@ -261,8 +264,8 @@ export default function ModalPostReader({ initialPublicId, readerScope="public",
   const editPost = useCallback(() => {
     if (!post || !onEdit) return;
     onClose();
-    onEdit(post.id);
-  }, [onClose, onEdit, post]);
+    onEdit(post.id,{publicId:post.publicId,adminReaderContext:activeAdminReaderContext});
+  }, [activeAdminReaderContext, onClose, onEdit, post]);
 
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
@@ -335,7 +338,7 @@ export default function ModalPostReader({ initialPublicId, readerScope="public",
         <header className={`reader-toolbar${readerScope==="admin"?" admin-reader-toolbar":""}`}>
           <div><i /><span>{readerScope==="admin"?"管理阅读":"沉浸阅读"}</span>{readerScope==="admin"&&post&&<b>{post.spaceId?"知识空间":post.status==="draft"?"公开草稿":"已发布"}</b>}</div>
           {post && <button className="reader-toolbar-title" type="button" onClick={returnToTop} aria-label={`${post.title}，已阅读 ${Math.round(readingProgress * 100)}%，返回文章顶部`} title="返回文章顶部"><span>{post.title}</span><i>↑</i><b>{Math.round(readingProgress * 100)}%</b></button>}
-          {post && <IslandSearch variant="reader" scope={readerScope} initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); setActivePublicId(result.publicId); }} />}
+          {post && <IslandSearch variant="reader" scope={readerScope} initialText={post.title} excludeSlug={post.slug} onSelect={(result) => { resetReaderState(); setTocOpen(false); if(readerScope==="admin")setActiveAdminReaderContext(DEFAULT_ADMIN_READER_CONTEXT); setActivePublicId(result.publicId); }} />}
           {post&&readerScope==="admin"&&onEdit&&<button className="reader-toolbar-edit" type="button" onClick={editPost} title="编辑文章（E）">编辑</button>}
           <button className="reader-toolbar-close" type="button" onClick={onClose} autoFocus aria-label="关闭阅读弹窗">×</button>
           <span className="reader-toolbar-progress" style={{ "--reader-progress": readingProgress } as React.CSSProperties} aria-hidden="true" />
@@ -349,7 +352,7 @@ export default function ModalPostReader({ initialPublicId, readerScope="public",
         {post && <>
           {tocItems.length > 0 && <button className={`reader-toc-toggle ${tocVisible ? "visible" : ""}`} type="button" onClick={() => setTocOpen((value) => !value)} aria-label="打开文章目录" aria-expanded={tocOpen}>目录</button>}
           <div className="reader-scroll" ref={scrollRef}>
-            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{readerScope==="admin"?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><i /><span>{post.viewCount.toLocaleString("zh-CN")} 阅读</span>{readerScope==="admin"&&<><i/><span>{post.spaceId?"私有知识":post.status==="draft"?"草稿":"公开文章"}</span></>}</div>{readerScope==="admin"&&<aside className="reader-admin-context"><span><i/>{post.spaceId?"仅管理员与 MCP 可见":post.status==="draft"?"尚未公开发布":"公开博客可见"}</span><b>{post.spaceId?(post.spacePath||"知识空间"):post.categoryName||"无分类"}</b><Link href={`/admin/reader/${encodeURIComponent(post.publicId)}`}>独立阅读 ↗</Link>{onEdit&&<button type="button" onClick={editPost}>编辑此文 <kbd>E</kbd></button>}</aside>}</header>
+            <header className="reader-hero"><span style={{ color:post.categoryColor ?? undefined }}>{readerScope==="admin"?(post.spaceId?post.spacePath||"知识空间":post.status==="draft"?"公开草稿":post.categoryName):post.categoryName}</span><h1>{post.title}</h1><p>{post.excerpt}</p><div><time>{formatLongDate(post.publishedAt,post.status==="draft"?"尚未发布":"未发布")}</time><i /><span>{post.viewCount.toLocaleString("zh-CN")} 阅读</span>{readerScope==="admin"&&<><i/><span>{post.spaceId?"私有知识":post.status==="draft"?"草稿":"公开文章"}</span></>}</div>{readerScope==="admin"&&<aside className="reader-admin-context"><span><i/>{post.spaceId?"仅管理员与 MCP 可见":post.status==="draft"?"尚未公开发布":"公开博客可见"}</span><b>{post.spaceId?(post.spacePath||"知识空间"):post.categoryName||"无分类"}</b><Link href={adminReaderHref(post.publicId,activeAdminReaderContext)}>独立阅读 ↗</Link>{onEdit&&<button type="button" onClick={editPost}>编辑此文 <kbd>E</kbd></button>}</aside>}</header>
             <article className="reader-prose markdown-body" ref={articleRef}><MarkdownRenderer>{post.content}</MarkdownRenderer><ArticleEndMark /></article>
             <section className="reader-neighbors" aria-label="上一篇和下一篇">
               <header><small>KEEP READING</small><h2>继续阅读</h2></header>
