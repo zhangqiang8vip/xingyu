@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { attachments, posts } from "./schema";
+import { removeAttachmentReference } from "@/domain/attachments/markdown-reference";
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_MCP_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -118,6 +119,35 @@ export async function listPostAttachments(postId: number) {
   return getDb().select().from(attachments)
     .where(eq(attachments.postId, postId))
     .orderBy(attachments.createdAt, attachments.id);
+}
+
+export async function deleteAttachment(publicId: string) {
+  await ensureDatabase();
+  const record = await getDb().select().from(attachments)
+    .where(eq(attachments.publicId, publicId)).limit(1);
+  if (!record[0]) throw new AttachmentError("附件不存在或已经删除", 404);
+
+  if (record[0].postId) {
+    const post = await getDb().select({ content: posts.content }).from(posts)
+      .where(eq(posts.id, record[0].postId)).limit(1);
+    if (post[0]) {
+      const markdown = attachmentMarkdown(record[0]);
+      const content = removeAttachmentReference(post[0].content, { url: attachmentUrl(record[0]), markdown });
+      if (content !== post[0].content) {
+        await getDb().update(posts).set({ content, updatedAt: new Date().toISOString() })
+          .where(eq(posts.id, record[0].postId));
+      }
+    }
+  }
+  await getDb().delete(attachments).where(eq(attachments.publicId, publicId));
+  try {
+    await env.MEDIA.delete(record[0].objectKey);
+  } catch (error) {
+    // The database row owns reachability. Once it is gone the object is private
+    // and can be reclaimed later without turning a successful delete into a retry.
+    console.error("attachment object cleanup failed", { publicId, error });
+  }
+  return record[0];
 }
 
 export async function bindMarkdownAttachments(postId: number, markdown: string) {

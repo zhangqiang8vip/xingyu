@@ -4,6 +4,7 @@ import {DatabaseSync} from "node:sqlite";
 import {hasRequestIdentity,isHtmlDocumentRequest,isPublicDocumentRequest,publicDocumentCacheControl,publicDocumentCacheKey,publicDocumentCategory,publicDocumentStorageCacheControl,readPublicContentRevision,responseAllowsPublicStorage} from "../worker/public-document-cache.ts";
 import {PUBLIC_CACHE_SCHEMA_STATEMENTS} from "../db/public-cache-schema.ts";
 import {attachmentCacheControl,attachmentEtagMatches} from "../domain/attachments/http-cache.ts";
+import {removeAttachmentReference} from "../domain/attachments/markdown-reference.ts";
 
 test("only public HTML documents receive a revisioned cache key",()=>{
   const html=new Request("https://example.com/archive?category=notes",{headers:{Accept:"text/html,application/xhtml+xml"}});
@@ -74,6 +75,15 @@ test("attachment caching revalidates visibility before reusing bytes",()=>{
   assert.equal(attachmentEtagMatches('"other", W/"abc"','"abc"'),true);
   assert.equal(attachmentEtagMatches('"other"','"abc"'),false);
   assert.equal(attachmentEtagMatches('*','"abc"'),true);
+});
+
+test("attachment deletion removes generated image and file references without touching prose",()=>{
+  const attachment={
+    url:"/api/attachments/att_1234567890abcdef1234567890abcdef/notes.pdf",
+    markdown:'[notes.pdf](/api/attachments/att_1234567890abcdef1234567890abcdef/notes.pdf "PDF · 2 MB")',
+  };
+  assert.equal(removeAttachmentReference(`保留这一段\n\n${attachment.markdown}\n\n继续阅读`,attachment),"保留这一段\n\n继续阅读");
+  assert.equal(removeAttachmentReference(`![自定义标题](${attachment.url})\n\n正文`,attachment),"正文");
 });
 
 test("public cache revision changes only when public presentation can change",()=>{

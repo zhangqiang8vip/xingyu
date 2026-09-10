@@ -439,12 +439,13 @@ test("admin global search covers every article through the shared authenticated 
 });
 
 test("attachments inherit article visibility and are available to editors and MCP", async () => {
-  const [schema, bootstrap, attachments, attachmentCache, uploadRoute, downloadRoute, mediaRoute, renderer, editor, mcp, wrangler] = await Promise.all([
+  const [schema, bootstrap, attachments, attachmentCache, uploadRoute, manageRoute, downloadRoute, mediaRoute, renderer, editor, mcp, wrangler] = await Promise.all([
     source("db/schema.ts"),
     source("db/bootstrap.ts"),
     source("db/attachments.ts"),
     source("domain/attachments/http-cache.ts"),
     source("app/api/attachments/route.ts"),
+    source("app/api/attachments/[publicId]/route.ts"),
     source("app/api/attachments/[publicId]/[...name]/route.ts"),
     source("app/api/media/[...key]/route.ts"),
     source("features/markdown/MarkdownRenderer.tsx"),
@@ -455,8 +456,11 @@ test("attachments inherit article visibility and are available to editors and MC
   assert.match(schema, /attachments = sqliteTable\("attachments"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS attachments/);
   assert.match(attachments, /bindMarkdownAttachments/);
+  assert.match(attachments, /deleteAttachment/);
   assert.match(attachments, /MAX_ATTACHMENT_BYTES = 25 \* 1024 \* 1024/);
   assert.match(uploadRoute, /isAdminRequest/);
+  assert.match(uploadRoute, /export async function GET/);
+  assert.match(manageRoute, /export async function DELETE/);
   assert.match(downloadRoute, /postStatus === "published" && attachment\.postSpaceId === null/);
   assert.match(downloadRoute, /env\.IMAGES/);
   assert.match(attachmentCache, /private, no-store/);
@@ -470,7 +474,9 @@ test("attachments inherit article visibility and are available to editors and MC
   assert.match(wrangler, /"images"\s*:\s*\{\s*"binding"\s*:\s*"IMAGES"/);
   assert.match(wrangler, /"cache"\s*:\s*\{\s*"enabled"\s*:\s*true/);
   assert.match(renderer, /md-attachment-card/);
-  assert.match(editor, /attachments&&<label className=/);
+  assert.match(editor, /attachment-manager/);
+  assert.match(editor, /role=\{notice\.kind==="error"\?"alert":"status"\}/);
+  assert.match(editor, /uploadErrorDetail/);
   for (const tool of ["upload_attachment", "list_attachments", "download_attachment"]) {
     assert.ok(mcp.includes(`server.registerTool("${tool}"`), `missing MCP attachment tool ${tool}`);
   }
