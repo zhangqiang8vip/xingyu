@@ -123,11 +123,17 @@ application rollout
 
 **禁止再在用户请求里改 schema。**
 
-### 实施要点
+### 实施要点（已按前置调查修正）
 
-- `drizzle/` 已存在且格式规范，直接作为 `migrations_dir` 接入，**不必重写迁移历史**。
-- 需处理历史包袱：现有生产库的 schema 是 `bootstrap.ts` 建的，其最终状态与 `drizzle/0000-0008` 未必逐字节一致。**上线前必须在生产库副本上验证迁移幂等**，否则会破坏线上数据。
-- 这是本路线图中**风险最高**的一步，建议单独 PR、单独验证、可回滚。
+前置调查见 `docs/plans/2026-09-11-schema-truth-source-divergence.md`，结论改变了实施方式：
+
+- **不能**把现有 `drizzle/` 直接接入作为唯一真相源——它无法从空库重建可运行的数据库（缺 `admin_login_attempts`、`public_cache_state`、10 个 `public_cache_*` 触发器）。
+- **不能**就地升级老生产库：生产库 `d1_migrations` 为空，重放会从 0000 开始并在首条 `CREATE TABLE` 失败。
+- **禁止**"把老库标记为基线已应用"、手工改 `d1_migrations`、或用 `app_meta` 伪装迁移已执行。
+- 采用 **Blue/Green D1**：先补齐 `db/schema.ts` 建模与迁移链，再用 `xingyu-production-v2` 新库完成切换，见分歧报告第 5 节的 Phase A–I。
+- **生产 export 是 cutover 前置条件**；本地结论只证明"当前代码想要的运行期 schema"，不能替代真实生产 D1 的 schema/export 验证。
+
+这是本路线图中**风险最高**的一步，建议单独 PR、单独验证、可回滚。
 
 ---
 

@@ -9,11 +9,17 @@
 
 **答案：不是。而且分歧比预想更严重——真相源有三处，不是两处。**
 
+> **本报告的结论边界（重要）**
+>
+> 本报告证明的是：**当前代码希望得到的运行期 schema**，与 drizzle 迁移历史所描述的结构，两者不一致。
+>
+> 它**不能**证明真实生产 D1 没有历史漂移、旧版本遗留或手工改动。生产库经历过多个版本的 `ensureDatabase()` 迭代，其实际结构未必等于"今天这份 bootstrap 代码在空库上的结果"。
+>
+> 因此 **PR-02 切换前必须对真实生产 D1 做 schema / export 验证**（见第 5 节 Phase A）。本地结论只能用来指导迁移链的重建，不能替代生产验证。
+
 ---
 
 ## 1. 调查方法（可复现）
-
-不需要生产库副本即可回答：生产库就是同一份代码建出来的，本地复现等价。
 
 用 wrangler 的 `createTestHarness` 起两个**互相独立**的本地 workerd + D1：
 
@@ -100,49 +106,141 @@ SQLite 会为内联 `UNIQUE` 生成**隐式** `sqlite_autoindex_<table>_<n>`，�
 
 若直接把 `drizzle/` 作为真相源并让新环境只跑它，**新库会缺 `admin_login_attempts`、`public_cache_state` 和 10 个触发器**——登录限流报错、公开缓存永不失效。这是**功能级破坏**，不是风格问题。
 
-### 4.2 迁移基线必须按"生产实际 schema"定义，而非按 drizzle 历史
+### 4.2 迁移链必须能从空库完整重建结构
 
-正确顺序是**先对齐、再切换**：
+唯一真相源必须满足这条硬标准：
+
+```text
+空数据库
++
+migration history
+=
+可以运行完整 XINGYU 的数据库
+```
+
+禁止依赖 `GET /`、`ensureDatabase()` 或 `public-cache-schema.ts` 的请求期 DDL 才能让数据库可用。
+
+迁移链必须能建立（当前遗漏的部分）：
+
+```text
+admin_login_attempts
+public_cache_state
+全部 public_cache_* triggers（10 个）
+所有当前正式表
+所有正式 index
+所有 uniqueness
+所有需要保留的 FTS 对象
+当前 schema 所需的 backfill / invariant
+```
+
+配套工作：
 
 ```text
 1. 让 db/schema.ts 补全缺失建模
    - 新增 admin_login_attempts（目前完全没有建模）
-   - public_cache_state 已有声明，但需确认与 public-cache-schema.ts 的实际 DDL 一致
-   - 触发器无法用 Drizzle DSL 表达 → 需作为自定义 SQL 迁移纳入版本管理
+   - public_cache_state 已有声明，需确认与 public-cache-schema.ts 的实际 DDL 一致
+   - 触发器无法用 Drizzle DSL 表达 → 作为自定义 SQL 迁移纳入版本管理
 
-2. 生成一份"基线迁移"，其内容 = 当前生产实际 schema（bootstrap 的最终状态）
-   - 这样既有的生产库可被标记为"已应用基线"，不会被重复执行
-   - 全新库跑基线即得到与生产一致的结构
+2. 之后的 schema 变更只走 drizzle generate
 
-3. 之后的 schema 变更只走 drizzle generate
-
-4. 加一个 CI 步骤：把 drizzle 迁移应用到空库，再与 bootstrap 期建库做结构化对比，
+3. 加一个 CI 步骤：把迁移应用到空库，再与请求期建库做结构化对比，
    差异数必须为 0 —— 让分歧不可能再悄悄出现
 ```
 
-### 4.3 既有生产库的升级安全（最高风险点）
+### 4.3 既有生产库不能就地升级（最高风险点）
 
 - 生产库由 bootstrap 建出，其结构与 drizzle 历史**不一致**（见 §3.1）。
-- 直接对生产库 `wrangler d1 migrations apply` **不安全**。生产库的 `d1_migrations` 表是空的（从未跑过迁移），因此 wrangler 会**从 0000 开始重放全部迁移**，而第一条 `CREATE TABLE categories` 就会以 `table categories already exists` 失败——实测已复现这一错误类别。
-- 即使绕过 `CREATE TABLE`，后续的 `ALTER TABLE posts ADD space_id` 也会以 `duplicate column name` 失败（实测复现）。也就是说，drizzle 的迁移历史**无法重放于生产库**。
-- 因此**必须**先在生产库副本上验证迁移幂等性（第 4.2 步的"基线"正是为此设计）。
-- 建议同时加 `app_meta` 中的基线标记，让迁移逻辑能识别"这是既有库还是全新库"。
+- 直接对生产库 `wrangler d1 migrations apply` **不安全**。生产库的 `d1_migrations` 表是空的（从未跑过迁移），wrangler 会**从 0000 开始重放全部迁移**，第一条 `CREATE TABLE categories` 即以 `table categories already exists` 失败——实测已复现。
+- 即使绕过 `CREATE TABLE`，后续的 `ALTER TABLE posts ADD space_id` 也会以 `duplicate column name` 失败（实测复现）。drizzle 的迁移历史**无法重放于生产库**。
 
-### 4.4 `ensureDatabase()` 的收敛目标
+**因此不采用"就地升级老库"的路线**，改为第 5 节的 Blue/Green 新建库。
 
-切换完成后，`ensureDatabase()` 只应保留：
+### 4.4 明确禁止的做法
+
+```text
+禁止：把老生产库标记为"baseline 已应用"
+禁止：手工修改 d1_migrations 表
+禁止：用 app_meta 伪装某条 Wrangler migration 已执行
+```
+
+`app_meta` **只能**继续用于**应用自己的 schema compatibility 检查**（例如运行环境身份、schema 版本下限），**不能**代替 `Wrangler d1_migrations` 来表示迁移执行状态。
+
+```text
+禁止：在切换完成并验证稳定之前，删除 request-time schema mutation
+```
+
+### 4.5 `ensureDatabase()` 的收敛（放到最后一步）
+
+切换并验证稳定之后，`ensureDatabase()` 才收缩为：
 
 - binding 是否存在
 - 环境身份是否正确（保留现有"串库拒绝启动"保护）
 - schema 版本是否满足最低要求 → **不满足则 fail fast**
 
-**禁止再在用户请求里改 schema。** 但注意：`public-cache-schema.ts` 的触发器也走请求期，必须一并迁移出去。
+**禁止再在用户请求里改 schema。** `public-cache-schema.ts` 的触发器同样走请求期，必须一并迁出去。
+
+这一步在 Blue/Green 中是 **Phase I**，不是开头。
 
 ---
 
-## 5. 结论
+## 5. PR-02 实施方案：Blue/Green D1
 
-1. **P0-2 的严重性得到实测确认，且比初判更高**：真相源是**三处**，`drizzle/` 是最不完整的一份，甚至无法重建生产库。
+### 5.1 目标结构
+
+```text
+xingyu-production        当前生产库，暂时保持不动（Blue）
+xingyu-production-v2     migration-first 新生产库（Green）
+```
+
+切换靠**改 Worker D1 binding**，不靠就地改老库。
+
+### 5.2 实施阶段
+
+| 阶段 | 内容 |
+| --- | --- |
+| **A** | 获取真实生产库 export（数据 + 单独一份 schema export） |
+| **B** | 让 migration chain 从空 D1 完整创建全部 schema |
+| **C** | 将 migration 建出的 schema 与真实生产 schema 做结构化比较 |
+| **D** | 将生产数据导入 `production-v2` |
+| **E** | 校验：row count / unique / foreign key / slug / publicId / cache / OAuth / 文章 smoke test |
+| **F** | 短暂冻结写入，执行最终增量同步或最终重新导入 |
+| **G** | 修改 Worker D1 binding 指向 `production-v2` |
+| **H** | 生产 smoke test |
+| **I** | 确认稳定后，才把 `ensureDatabase()` 收缩成只检查不迁移 |
+
+### 5.3 生产 export 是切换前置条件
+
+不再把"是否有生产副本"当作设计选择。**正式 cutover 前必须有真实 production export。**
+
+```bash
+wrangler d1 export xingyu-production --remote --output=<安全的本地路径>
+wrangler d1 export xingyu-production --remote --no-data --output=<安全的本地路径>
+```
+
+安全要求：
+
+```text
+数据库导出文件绝对不能提交 Git
+绝对不能放进 docs/
+绝对不能 push 到远端
+```
+
+若当前环境没有 Cloudflare 登录权限：可以**继续做 PR-02 的代码侧 migration reconstruction 工作**，但**禁止执行生产切换**。
+
+### 5.4 验收
+
+```text
+空库 + migration history = 可运行完整 XINGYU 的数据库
+migration schema 与真实生产 schema 的结构化差异 = 0（或对每一处差异有书面解释）
+数据校验（Phase E）全部通过
+Worker 切到 v2 后生产 smoke test 通过
+```
+
+---
+
+## 6. 结论
+
+1. **P0-2 的严重性得到实测确认，且比初判更高**：真相源是**三处**，`drizzle/` 是最不完整的一份，无法重建可运行的数据库。
 2. **不存在"唯一索引缺失"导致的正确性缺口**——唯一性由内联 `UNIQUE` 保障，初次误报已撤回。
-3. **PR-02 的第一步不是"接入 drizzle"，而是"先补齐 `db/schema.ts` 建模 + 建立与生产实际一致的基线迁移"**，否则会把一个不可用的 schema 扶正为唯一真相源。
-4. **生产库升级必须先在副本上验证幂等**，因为 drizzle 历史与生产实际结构不一致（`ALTER TABLE ... ADD` 类语句会直接失败）。
+3. **PR-02 采用"先对齐、再切换"，但不是"标记基线已应用"**：先补齐 `db/schema.ts` 建模与迁移链，再用 **Blue/Green 新建库**完成切换，不就地升级老库。
+4. **生产 export 是 cutover 的前置条件**，且本报告只证明"当前代码想要的运行期 schema"，不能证明真实生产 D1 无历史漂移。
