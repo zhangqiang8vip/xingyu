@@ -62,14 +62,20 @@ export async function openTestHarness() {
 
   // Dispatch through the Worker handle rather than `server.fetch()`.
   //
-  // `server.fetch()` proxies each request over a local socket through
-  // miniflare's entry worker. When a Worker returns a response without
-  // consuming the request body (which `isAdminRequest` does deliberately: it
-  // rejects unauthenticated writes before parsing untrusted input), the next
-  // request through that proxy fails with "Network connection lost" and only
-  // the request after that recovers. Direct dispatch avoids the socket hop
-  // entirely while still exercising the real fetch handler, routing, auth,
-  // domain logic and local D1.
+  // What this exercises: the real production Worker `fetch` handler, and the
+  // real auth -> domain/db -> local D1 path behind it. It is direct Worker
+  // dispatch, so it does NOT go through the test harness's route matching,
+  // meaning these tests do not verify the Cloudflare domain route config in
+  // wrangler.production.jsonc. The four security contracts here are about
+  // auth, scope and read boundaries rather than route matching, so that gap
+  // is acceptable and is noted rather than papered over.
+  //
+  // Why not `server.fetch()`: it proxies each request over a local socket
+  // through miniflare's entry worker. When a Worker returns a response
+  // without consuming the request body (which `isAdminRequest` does
+  // deliberately, rejecting unauthenticated writes before parsing untrusted
+  // input), the next request through that proxy fails with "Network
+  // connection lost" and only the request after that recovers.
   const dispatch = (path, init) => worker.fetch(path, init);
 
   // `ensureDatabase()` only runs on a request, so the schema does not exist
@@ -251,6 +257,29 @@ export async function initializeMcp(harness, token) {
   assert.equal(response.status, 200, `MCP initialize should succeed, got ${response.status} ${response.text}`);
   assert.ok(response.payload?.result, `MCP initialize should return a result, got ${response.text}`);
   return response.headers.get("mcp-session-id");
+}
+
+/**
+ * Runs a callback against a real MCP client built from the official SDK.
+ *
+ * This is the path a real MCP host uses: it validates tool results against the
+ * tool's declared outputSchema, so it proves the error contract is actually
+ * readable by clients rather than only being present on the wire.
+ */
+export async function withMcpClient({ origin }, token, run) {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+
+  const transport = new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), {
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+  });
+  const client = new Client({ name: "xingyu-pr01-integration", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    return await run(client);
+  } finally {
+    await client.close().catch(() => {});
+  }
 }
 
 export async function callMcpTool(harness, { name, arguments: toolArguments, token, id = 2 }) {

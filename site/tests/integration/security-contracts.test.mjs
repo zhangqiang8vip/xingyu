@@ -12,6 +12,7 @@ import {
   seedReadOnlyOAuthToken,
   TEST_SLUGS,
   TEST_TITLES,
+  withMcpClient,
   WRITE_SCOPE,
 } from "./harness.mjs";
 
@@ -122,6 +123,37 @@ test("MCP rejects invalid bearer tokens and read-only tokens cannot call write t
       result.structuredContent?.required_scope,
       WRITE_SCOPE,
       "the rejection must name the scope that was required",
+    );
+
+    // The official SDK client path. It validates the tool result against the
+    // tool's declared outputSchema, so this proves a real MCP host can read
+    // the permission error instead of tripping over schema validation.
+    const sdkResult = await withMcpClient(harness, READ_ONLY_TOKEN, (client) =>
+      client.callTool({
+        name: "create_draft",
+        arguments: {
+          title: TEST_TITLES.forbiddenDraft,
+          slug: TEST_SLUGS.forbiddenDraft,
+          content_markdown: "# This must never be written",
+          change_summary: "PR01 integration contract",
+        },
+      }),
+    );
+
+    assert.equal(
+      sdkResult.isError,
+      true,
+      "an official SDK client must receive the rejection as a tool error",
+    );
+    assert.equal(
+      sdkResult.structuredContent?.error,
+      "insufficient_scope",
+      `the SDK client must be able to read insufficient_scope, got ${JSON.stringify(sdkResult.structuredContent)}`,
+    );
+    assert.equal(
+      sdkResult.structuredContent?.required_scope,
+      WRITE_SCOPE,
+      "the SDK client must be able to read the required scope",
     );
 
     assert.equal(
