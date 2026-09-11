@@ -1,6 +1,9 @@
 # Codex/local agent state
 /.agents/
 
+# Local agent working memory
+/.workbuddy-ai/
+
 # OS and editor files
 .DS_Store
 Thumbs.db
