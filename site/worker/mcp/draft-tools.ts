@@ -15,6 +15,7 @@ import {
   CATEGORY_SCHEMA,
   CHANGE_SUMMARY_SCHEMA,
   IDENTIFIER_SCHEMA,
+  MCP_ERROR_OUTPUT_FIELDS,
   RECEIPT_OUTPUT_SCHEMA,
   SPACE_SCHEMA,
   activityReceipt,
@@ -39,7 +40,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       post_identifier: IDENTIFIER_SCHEMA.optional(),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("上传文章附件"),
     },
-    outputSchema: { ok: z.boolean(), attachment: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { attachment: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ filename, content_type, content_base64, post_identifier, change_summary }) => {
     try {
@@ -98,7 +99,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       featured: z.boolean().optional().default(false),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("创建新的 Markdown 文章草稿"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {
@@ -158,7 +159,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       featured: z.boolean().optional(),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("更新文章内容"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, async ({ identifier, title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
     try {

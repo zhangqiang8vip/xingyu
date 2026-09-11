@@ -19,6 +19,7 @@ import { requireScope } from "../mcp-auth";
 import { extractMarkdownOutline, postReadHint, searchPostCard, type PostView } from "./post-read";
 import {
   IDENTIFIER_SCHEMA,
+  MCP_ERROR_OUTPUT_FIELDS,
   SPACE_SCHEMA,
   hydratePost,
   listMcpActivity,
@@ -33,9 +34,9 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "列出文章分类",
     description: "读取线上博客的全部可用分类。创建文章前可用它确认 category 参数。",
     inputSchema: {},
-    outputSchema: { ok: z.boolean(), categories: z.array(z.object({
+    outputSchema: { categories: z.array(z.object({
       id: z.number(), name: z.string(), slug: z.string(), color: z.string(),
-    })).optional(), error: z.string().optional() },
+    })).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
     try {
@@ -54,7 +55,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "浏览知识空间",
     description: "读取顶级空间或指定空间的直属子空间。空间层级不固定，可逐层浏览。",
     inputSchema: { parent: SPACE_SCHEMA.optional(), query: z.string().trim().max(100).optional() },
-    outputSchema: { ok: z.boolean(), spaces: z.array(z.record(z.string(), z.unknown())).optional(), error: z.string().optional() },
+    outputSchema: { spaces: z.array(z.record(z.string(), z.unknown())).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ parent, query }) => {
     try {
@@ -73,7 +74,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "读取知识空间",
     description: "读取空间完整路径、直属子空间、后代数量与文章总数。",
     inputSchema: { space: SPACE_SCHEMA },
-    outputSchema: { ok: z.boolean(), space: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: { space: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ space }) => {
     try {
@@ -99,10 +100,9 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
       page_size: z.number().int().min(1).max(50).optional().default(12),
     },
     outputSchema: {
-      ok: z.boolean(),
       posts: z.array(z.record(z.string(), z.unknown())).optional(),
       next_cursor: z.string().nullable().optional(),
-      error: z.string().optional(),
+      ...MCP_ERROR_OUTPUT_FIELDS,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ query, status, category, space, include_descendants, detail, cursor, page_size }) => {
@@ -132,7 +132,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
       view: z.enum(["meta", "excerpt", "outline", "content"]).optional().default("outline")
         .describe("meta 仅元数据；excerpt 加摘要；outline 加标题大纲；content 才返回完整 Markdown"),
     },
-    outputSchema: { ok: z.boolean(), post: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: { post: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ identifier, view }) => {
     try {
@@ -174,7 +174,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     inputSchema: {
       slug: z.enum(["connect", "about"]).describe("页面标识：connect 为接入页，about 为关于页"),
     },
-    outputSchema: { ok: z.boolean(), page: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: { page: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ slug }) => {
     try {
@@ -202,7 +202,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "查看 AI 写作记录",
     description: "只读查看最近的 MCP 写入回执，包括文章、操作、状态变化、修改字段、客户端与时间。",
     inputSchema: { limit: z.number().int().min(1).max(50).optional().default(20) },
-    outputSchema: { ok: z.boolean(), activities: z.array(z.record(z.string(), z.unknown())).optional(), error: z.string().optional() },
+    outputSchema: { activities: z.array(z.record(z.string(), z.unknown())).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ limit }) => {
     try {
@@ -217,7 +217,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "列出文章已上传的附件",
     description: "读取一篇文章已经绑定的图片和文件，以及可插入正文的 Markdown 链接。文章有没有附件，先用这个工具确认。",
     inputSchema: { identifier: IDENTIFIER_SCHEMA },
-    outputSchema: { ok: z.boolean(), attachments: z.array(z.record(z.string(), z.unknown())).optional(), error: z.string().optional() },
+    outputSchema: { attachments: z.array(z.record(z.string(), z.unknown())).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ identifier }) => {
     try {
@@ -246,7 +246,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "下载已上传的文章附件",
     description: "通过附件 public_id 读取星屿上已有的图片或文件。返回 Base64、校验值和文件信息，便于继续处理或重新插入正文。",
     inputSchema: { public_id: z.string().regex(/^att_[a-f0-9]{32}$/i) },
-    outputSchema: { ok: z.boolean(), attachment: z.record(z.string(), z.unknown()).optional(), error: z.string().optional() },
+    outputSchema: { attachment: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ public_id }) => {
     try {

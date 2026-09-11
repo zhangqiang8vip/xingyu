@@ -24,6 +24,23 @@ export const RECEIPT_OUTPUT_SCHEMA = z.object({
   recorded_at: z.string().nullable(),
 });
 
+/**
+ * Result fields shared by every MCP tool outputSchema.
+ *
+ * `toolFailure()` routes a ScopeError through `scopeFailure()`, which returns
+ * `required_scope` next to `ok` and `error`. Every tool can raise a scope
+ * error, so every outputSchema has to allow that field. Without it, strict
+ * MCP clients reject the whole result with -32602 ("Structured content does
+ * not match the tool's output schema") instead of surfacing
+ * insufficient_scope to the caller, which turns a clear permission error into
+ * an opaque protocol failure.
+ */
+export const MCP_ERROR_OUTPUT_FIELDS = {
+  ok: z.boolean(),
+  error: z.string().optional(),
+  required_scope: z.string().optional(),
+};
+
 export type McpToolContext = {
   server: McpServer;
   origin: string;

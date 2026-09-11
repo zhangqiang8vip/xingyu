@@ -3,6 +3,7 @@ import { createSpace, deleteSpace, getSpacePath, resolveSpace, updateSpace } fro
 import { requireScope } from "../mcp-auth";
 import {
   CHANGE_SUMMARY_SCHEMA,
+  MCP_ERROR_OUTPUT_FIELDS,
   RECEIPT_OUTPUT_SCHEMA,
   SPACE_SCHEMA,
   activityReceipt,
@@ -17,7 +18,7 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
     title: "创建知识空间",
     description: "创建顶级空间或任意空间的子空间。写入前应向用户说明空间名称、父路径与用途。",
     inputSchema: { name: z.string().trim().min(1).max(100), parent: SPACE_SCHEMA.optional(), change_summary: CHANGE_SUMMARY_SCHEMA },
-    outputSchema: { ok: z.boolean(), space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ name, parent, change_summary }) => {
     try {
@@ -37,7 +38,7 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
     title: "修改或移动知识空间",
     description: "重要操作：重命名空间，或将空间移动到新的父空间；所有后代与文章会一起移动。",
     inputSchema: { space: SPACE_SCHEMA, name: z.string().trim().min(1).max(100).optional(), parent: SPACE_SCHEMA.nullable().optional(), change_summary: CHANGE_SUMMARY_SCHEMA },
-    outputSchema: { ok: z.boolean(), space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, async ({ space, name, parent, change_summary }) => {
     try {
@@ -63,7 +64,7 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
     title: "移动知识空间",
     description: "重要操作：将空间及其所有后代与文章移动到新的父空间。移动到知识空间根层时 parent 传 null。",
     inputSchema: { space: SPACE_SCHEMA, parent: SPACE_SCHEMA.nullable(), change_summary: CHANGE_SUMMARY_SCHEMA },
-    outputSchema: { ok: z.boolean(), space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { space: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, async ({ space, parent, change_summary }) => {
     try {
@@ -91,7 +92,7 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
       confirm_name: z.string().optional().default(""),
       change_summary: CHANGE_SUMMARY_SCHEMA,
     },
-    outputSchema: { ok: z.boolean(), result: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), error: z.string().optional() },
+    outputSchema: { result: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   }, async ({ space, mode, move_to, confirm_name, change_summary }) => {
     try {
