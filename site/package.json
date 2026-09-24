@@ -6,7 +6,7 @@
     "#domain/*": "./domain/*.ts"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.18.0 || >=24.11.0"
   },
   "scripts": {
     "dev": "vinext dev --hostname 127.0.0.1",
