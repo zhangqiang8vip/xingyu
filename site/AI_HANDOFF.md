@@ -17,6 +17,8 @@
 5. **写入与发布分开。** 创建草稿、更新、发布、撤回均是独立动作；无论后台还是 MCP，都不能默认替用户发布。
 6. **每次上线只用 `npm run deploy:production`。** 该命令固定“构建后部署”，禁止直接对旧 `dist` 执行 `wrangler deploy`。
 7. **不要把密钥、真实密码或 Token 提交进仓库。** `.env.local`、Cloudflare Secret、Codex 本机环境变量均应保持本地/平台侧管理。
+8. **`package-lock.json` 只能在 `site/` 目录内、用 npm 默认的 peer 解析策略生成。** `site/.npmrc` 已固定 `legacy-peer-deps=false`；若在用户级配置了 `legacy-peer-deps=true` 的机器上重新生成，lock 会静默丢掉 peer 依赖（例如 `react-server-dom-webpack` 的非可选 peer `webpack@^5`）及其整棵子树，CI 会在 `npm ci` 阶段以 `EUSAGE: lock file's ... does not satisfy ...` 失败。生成时 npm 版本也应对齐 CI（Node 22.18 自带 npm 10.9.x）。
+9. **`types:worker:check` 必须排在 `build` 之后。** `wrangler types` 的输出包含 `mainModule: typeof import("./dist/server/index")`，只有在 `dist/` 存在时才会生成该段并得出对应 hash。CI 是全新检出（没有 `dist/`），先跑检查必然报 "Types at cloudflare-env.d.ts are out of date"。
 
 ## 2. 技术架构
 
@@ -252,6 +254,15 @@ npm audit --omit=dev --registry=https://registry.npmjs.org
 3. Mermaid 从 jsDelivr 外链改成仓库依赖的动态导入。
 4. 新增 `deploy:production = npm run build && wrangler deploy --config wrangler.production.jsonc`。
 5. 测试增加了“Mermaid 不得回退 CDN”和“生产部署命令必须先构建”的回归断言。
+
+### CI 首次跑通（提交 `2030e50`、`4f006fd`）
+
+GitHub Actions 在此之前从未通过过，两次 `npm ci` 失败都源于本机配置而非代码：
+
+1. lock 是在 `legacy-peer-deps=true`（用户级 `.npmrc`）下生成的，缺失 peer 子树；已在默认 peer 解析下用 npm 10.9.3 重新生成，并新增 `site/.npmrc` 固定该策略。
+2. `ci` 与 `test` 脚本把 `types:worker:check` 移到 `build` 之后，修掉全新检出下的假失败。
+3. 当前 `overrides`：`@hono/node-server@2.0.11`、`baseline-browser-mapping@2.11.21`、`dompurify@3.4.15`、`fast-uri@3.1.7`、`hono@4.13.7`、`ip-address@10.7.0`、`nanoid@3.3.18`、`postcss@8.5.28`、`qs@6.16.0`、`sharp@0.35.4`。
+4. Node 引擎要求抬到 `^22.18.0 || >=24.11.0`（传递依赖 `@babel/*` 8.x 的要求），CI 的 `node-version` 同步为 22.18.0。
 
 ## 11. 已知取舍与后续优先级
 
