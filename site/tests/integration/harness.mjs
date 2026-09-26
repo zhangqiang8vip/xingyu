@@ -292,4 +292,3 @@ export async function callMcpTool(harness, { name, arguments: toolArguments, tok
   assert.ok(response.payload?.result, `MCP tools/call should return a result, got ${response.text}`);
   return response.payload.result;
 }
-
