@@ -1082,6 +1082,41 @@ test("Worker upload reports an orphan when D1 write and R2 cleanup both fail", a
     assert.equal(inventory.status, 200, await inventory.clone().text());
     assert.deepEqual((await inventory.json()).candidates.map(({ objectKey }) => objectKey), [objects[0].key],
       "the admin inventory must locate the object without a D1 row");
+
+    const queueRow = await harness.db.prepare(
+      "SELECT public_id, object_key, operation, status, attempts, last_error FROM attachment_cleanup_queue WHERE object_key = ?",
+    ).bind(objects[0].key).first();
+    assert.ok(queueRow, "a failed R2 rollback must persist a durable cleanup queue entry");
+    assert.equal(queueRow.public_id, result.attachmentId);
+    assert.equal(queueRow.operation, "upload_rollback");
+    assert.equal(queueRow.status, "pending");
+    assert.ok(Number(queueRow.attempts) >= 1, "the queue entry must count the failed reconciliation attempt");
+    assert.ok(queueRow.last_error, "the queue entry must record the cleanup error");
+
+    const anonymousQueue = await harness.dispatch("/api/attachments?mode=cleanup-queue");
+    assert.equal(anonymousQueue.status, 401, "the cleanup queue must stay admin-only");
+
+    const queueList = await harness.dispatch("/api/attachments?mode=cleanup-queue", { headers: { cookie } });
+    assert.equal(queueList.status, 200, await queueList.clone().text());
+    const queueItems = (await queueList.json()).items;
+    assert.ok(queueItems.some(({ objectKey }) => objectKey === objects[0].key),
+      "the admin queue must list the pending cleanup");
+
+    const resolveWhileStored = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: objects[0].key }),
+    });
+    assert.equal(resolveWhileStored.status, 409,
+      `resolve must refuse while the object still exists: ${await resolveWhileStored.clone().text()}`);
+
+    const anonymousResolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: objects[0].key }),
+    });
+    assert.equal(anonymousResolve.status, 401, "resolve must stay admin-only");
+
     await harness.env.MEDIA.delete(objects[0].key);
     assert.equal(await harness.env.MEDIA.head(objects[0].key), null,
       "an exact-key retry can clean up the failed object");
@@ -1564,6 +1599,99 @@ test("MCP space no-op updates leave the row and audit log unchanged", async () =
     assert.equal((await harness.db.prepare("SELECT parent_id FROM spaces WHERE id = ?")
       .bind(id).first())?.parent_id, destinationId);
     assert.equal(await auditCount(), 3, "a real move must still be audited");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("deleting an attachment queues its R2 object when cleanup fails", async () => {
+  const harness = await openTestHarness({ r2DeleteFault: true });
+  try {
+    const cookie = await loginAdmin(harness);
+    const boundary = "----XingyuDeleteFaultContract";
+    const form = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="note.md"\r\nContent-Type: text/markdown\r\n\r\ntest\r\n`,
+      `--${boundary}--\r\n`,
+    ].join("");
+    const upload = await harness.dispatch("/api/attachments", {
+      method: "POST", headers: { cookie, "content-type": `multipart/form-data; boundary=${boundary}` }, body: form,
+    });
+    assert.equal(upload.status, 201, await upload.clone().text());
+    const attachment = await upload.json();
+
+    const remove = await harness.dispatch(`/api/attachments/${attachment.id}`, {
+      method: "DELETE", headers: { cookie },
+    });
+    assert.equal(remove.status, 200, await remove.clone().text());
+    assert.equal((await harness.db.prepare("SELECT COUNT(*) AS count FROM attachments").first())?.count, 0,
+      "the D1 row must be gone even though the R2 object cleanup failed");
+
+    const row = await harness.db.prepare(
+      "SELECT public_id, object_key, operation, status FROM attachment_cleanup_queue WHERE public_id = ?",
+    ).bind(attachment.id).first();
+    assert.ok(row, "a failed R2 delete after commit must queue a durable cleanup entry");
+    assert.equal(row.operation, "delete");
+    assert.equal(row.status, "pending");
+    assert.match(row.object_key, new RegExp(`/${attachment.id}/`));
+    const objects = (await harness.env.MEDIA.list({ prefix: "attachments/" })).objects;
+    assert.equal(objects.length, 1, "the committed delete must leave its object for exact-key reclaiming");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("queued cleanup resolves once the object is gone and validates its input", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const publicId = "att_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const objectKey = `attachments/2026/09/${publicId}/ghost.md`;
+    await harness.db.prepare(
+      "INSERT INTO attachment_cleanup_queue (public_id, object_key, operation) VALUES (?, ?, 'delete')",
+    ).bind(publicId, objectKey).run();
+
+    const anonymousQueue = await harness.dispatch("/api/attachments?mode=cleanup-queue");
+    assert.equal(anonymousQueue.status, 401, "the cleanup queue must stay admin-only");
+    const anonymousResolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ objectKey }),
+    });
+    assert.equal(anonymousResolve.status, 401, "resolve must stay admin-only");
+
+    const invalidResolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: "../../etc/passwd" }),
+    });
+    assert.equal(invalidResolve.status, 400, "resolve must validate the object key shape");
+
+    const resolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey }),
+    });
+    assert.equal(resolve.status, 200, await resolve.clone().text());
+    assert.deepEqual(await resolve.json(), { objectKey, operation: "delete", resolved: true });
+
+    const row = await harness.db.prepare(
+      "SELECT status FROM attachment_cleanup_queue WHERE object_key = ?",
+    ).bind(objectKey).first();
+    assert.equal(row?.status, "resolved");
+
+    const again = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey }),
+    });
+    assert.equal(again.status, 409, "a second resolve must not claim a double recovery");
+
+    const missing = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: "attachments/2026/09/att_cccccccccccccccccccccccccccccccc/never.md" }),
+    });
+    assert.equal(missing.status, 404, "resolving an unknown object key must not fabricate a recovery");
   } finally {
     await closeTestHarness(harness);
   }
