@@ -2,9 +2,9 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
-import { attachments, posts, attachmentCleanupQueue } from "./schema";
+import { attachments, posts } from "./schema";
 import { removeAttachmentReference } from "@/domain/attachments/markdown-reference";
-import { cleanupFailedAttachmentUpload, enqueueAttachmentCleanup } from "./attachment-cleanup";
+import { cleanupFailedAttachmentUpload } from "./attachment-cleanup";
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_MCP_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -102,7 +102,7 @@ export async function createAttachment(input: {
   try {
     results = await env.DB.batch(statements);
   } catch (error) {
-    await cleanupFailedAttachmentUpload(env.MEDIA, publicId, objectKey, error, env.DB);
+    await cleanupFailedAttachmentUpload(env.MEDIA, publicId, objectKey, error);
     throw error;
   }
   const record = results[0]?.results?.[0] as {
@@ -112,7 +112,7 @@ export async function createAttachment(input: {
   if (!record) {
     const error = new AttachmentError(postId === null
       ? "附件记录创建失败" : "要关联的文章已不存在，附件未保存", 409);
-    await cleanupFailedAttachmentUpload(env.MEDIA, publicId, objectKey, error, env.DB);
+    await cleanupFailedAttachmentUpload(env.MEDIA, publicId, objectKey, error);
     throw error;
   }
   const auditRow = input.audit ? results[1]?.results?.[0] as { id?: number; created_at?: string } | undefined : undefined;
@@ -240,59 +240,8 @@ export async function deleteAttachment(publicId: string, expectedVersion?: numbe
       objectKey: record[0].objectKey,
       cleanupErrorType: error instanceof Error ? error.name : typeof error,
     }));
-    await enqueueAttachmentCleanup(env.DB, publicId, record[0].objectKey, "delete", error);
   }
   return { ...record[0], version: nextVersion };
-}
-
-export async function listCleanupQueueItems(limit = 100) {
-  await ensureDatabase();
-  const rows = await getDb().select({
-    id: attachmentCleanupQueue.id,
-    publicId: attachmentCleanupQueue.publicId,
-    objectKey: attachmentCleanupQueue.objectKey,
-    operation: attachmentCleanupQueue.operation,
-    status: attachmentCleanupQueue.status,
-    attempts: attachmentCleanupQueue.attempts,
-    lastError: attachmentCleanupQueue.lastError,
-    createdAt: attachmentCleanupQueue.createdAt,
-    updatedAt: attachmentCleanupQueue.updatedAt,
-  }).from(attachmentCleanupQueue)
-    .where(eq(attachmentCleanupQueue.status, "pending"))
-    .orderBy(attachmentCleanupQueue.createdAt, attachmentCleanupQueue.id)
-    .limit(Math.min(Math.max(Number.isSafeInteger(limit) ? limit : 100, 1), 500));
-  return rows.map((row) => ({
-    id: row.id,
-    publicId: row.publicId,
-    objectKey: row.objectKey,
-    operation: row.operation,
-    attempts: row.attempts,
-    lastError: row.lastError,
-    createdAt: row.createdAt,
-  }));
-}
-
-/**
- * Marks a queued cleanup as resolved. The operator must reclaim the R2 object
- * by its exact key first; resolving verifies server-side that the object is
- * gone before the queue entry is closed, so a stray click cannot hide an
- * object that is still stored.
- */
-export async function resolveCleanupQueueItem(objectKey: string) {
-  await ensureDatabase();
-  const rows = await getDb().select({
-    id: attachmentCleanupQueue.id,
-    status: attachmentCleanupQueue.status,
-    operation: attachmentCleanupQueue.operation,
-  }).from(attachmentCleanupQueue).where(eq(attachmentCleanupQueue.objectKey, objectKey)).limit(1);
-  if (!rows[0]) throw new AttachmentError("待回收对象不存在", 404);
-  if (rows[0].status === "resolved") throw new AttachmentError("该对象已标记为回收完成", 409);
-  const head = await env.MEDIA.head(objectKey);
-  if (head) throw new AttachmentError("对象仍存在于 R2，请先按精确键删除对象再确认回收", 409);
-  await getDb().update(attachmentCleanupQueue)
-    .set({ status: "resolved", updatedAt: new Date().toISOString() })
-    .where(eq(attachmentCleanupQueue.objectKey, objectKey));
-  return { objectKey, operation: rows[0].operation, resolved: true };
 }
 
 export function prepareMarkdownAttachmentBinding(

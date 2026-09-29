@@ -8,7 +8,6 @@ let ready: Promise<void> | null = null;
 const requiredUniqueIndexes = {
   attachments_object_key_uidx: { table: "attachments", columns: ["object_key"] },
   attachments_public_id_uidx: { table: "attachments", columns: ["public_id"] },
-  attachment_cleanup_queue_object_key_uidx: { table: "attachment_cleanup_queue", columns: ["object_key"] },
   categories_slug_uidx: { table: "categories", columns: ["slug"] },
   content_pages_slug_uidx: { table: "content_pages", columns: ["slug"] },
   oauth_access_tokens_hash_uidx: { table: "oauth_access_tokens", columns: ["token_hash"] },
@@ -26,8 +25,8 @@ const requiredUniqueIndexes = {
 
 const requiredMigrationObjects = {
   table: [
-    "admin_login_attempts", "app_meta", "attachment_cleanup_queue", "attachments", "categories",
-    "content_pages", "mcp_activity", "oauth_access_tokens", "oauth_authorization_codes", "oauth_clients",
+    "admin_login_attempts", "app_meta", "attachments", "categories", "content_pages",
+    "mcp_activity", "oauth_access_tokens", "oauth_authorization_codes", "oauth_clients",
     "oauth_consents", "oauth_rate_limits", "oauth_refresh_tokens", "post_preview_tokens",
     "post_slug_history", "post_views", "posts", "posts_fts", "public_cache_state",
     "site_settings", "spaces",
@@ -58,7 +57,7 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "15";
+  const schemaVersion = "14";
   const schemaMode = env.DB_SCHEMA_MODE ?? "legacy-bootstrap";
   const localPreviewBootstrap = schemaMode === "local-preview-bootstrap" && runtimeEnvironment === "production";
   if (schemaMode === "migration-only") {
@@ -176,7 +175,7 @@ async function initialize() {
       || Number(storedVersion) > Number(schemaVersion))) {
       throw new Error(`D1 schema version ${storedVersion} is newer than or incompatible with worker version ${schemaVersion}`);
     }
-    if (storedVersion && Number(storedVersion) < 15) {
+    if (storedVersion && Number(storedVersion) < 14) {
       const legacyObjects = await d1.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('posts', 'post_slug_history')")
         .all<{ name: string }>();
       if ((legacyObjects.results ?? []).length === 2) {
@@ -293,17 +292,6 @@ async function initialize() {
       sha256 TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
-    d1.prepare(`CREATE TABLE IF NOT EXISTS attachment_cleanup_queue (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      public_id TEXT,
-      object_key TEXT NOT NULL UNIQUE,
-      operation TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS post_preview_tokens (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       post_id INTEGER NOT NULL,
@@ -332,7 +320,6 @@ async function initialize() {
     d1.prepare("CREATE INDEX IF NOT EXISTS mcp_activity_created_idx ON mcp_activity(created_at DESC, id DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS mcp_activity_post_idx ON mcp_activity(post_id, id DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS attachments_post_created_idx ON attachments(post_id, created_at DESC, id DESC)"),
-    d1.prepare("CREATE INDEX IF NOT EXISTS attachment_cleanup_queue_status_idx ON attachment_cleanup_queue(status, created_at, id)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS post_preview_tokens_hash_uidx ON post_preview_tokens(token_hash)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS post_preview_tokens_post_idx ON post_preview_tokens(post_id, expires_at DESC, id DESC)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS post_preview_tokens_expiry_idx ON post_preview_tokens(expires_at)"),

@@ -167,11 +167,9 @@ site/
 | --- | --- | --- | --- |
 | 本地开发 | `npm run dev` | 项目内持久化 development D1/R2 | 日常真实写作与开发 |
 | 本地正式预览 | `npm run dev:production` | 独立的本地 production-preview D1/R2 | 检查空库/生产外观 |
-| 线上正式 | `npm run deploy:production` | Cloudflare D1 `xingyu-production-v2`（`migration-only`）与线上 R2 | 对公众可见 |
+| 线上正式 | `npm run deploy:production` | Cloudflare D1 `xingyu-production` 与线上 R2 | 对公众可见 |
 
-`db/bootstrap.ts` 会校验 `app_environment` / `app_meta.schema_version` 与必需表、索引、触发器和 FTS 结构；环境身份不匹配或结构不满足当前 schema 契约（代码内 `schemaVersion`，现为 **15**）时 fail fast，**绝不在请求期建表或改结构**。若同一个数据库被误接到另一环境，应用同样拒绝启动；**不要为了“先跑起来”而删除这些保护。**
-
-旧 Blue 库 `xingyu-production` 与旧 Worker 版本只是切换前的历史快照；切换后 Green 已产生新写入，**禁止直接切回旧库、旧导出或以旧版本代码对接 Green，否则会丢失切换后的文章、令牌与审计**。任何换库都必须从届时最新 Green 重新导出、逐表核对并在隔离库验证（详见 `docs/plans/` 两份路线图记录）。
+`db/bootstrap.ts` 会写入 `app_environment`。若同一个数据库被误接到另一环境，应用会拒绝启动；**不要为了“先跑起来”而删除此保护。**
 
 ### 后台登录
 
@@ -249,15 +247,7 @@ npm audit --omit=dev --registry=https://registry.npmjs.org
 
 ## 10. 最近完成的安全与交付修复
 
-### 2026-09 生产 D1 切换与写入加固（详见 `docs/plans/` 两份路线图记录）
-
-1. 生产 D1 已从 bootstrap 建出的旧 Blue 库切至 migration-first 的 Green 库 `xingyu-production-v2`：schema 14、13 条编号迁移、`DB_SCHEMA_MODE=migration-only`；17 张业务表逐行核对，FTS、缓存 revision 与 13 项关系审计通过。
-2. 文章/附件/空间/分类写入改为 D1 原子批处理 + `expected_version` 乐观并发；MCP 审计与内容写入同批次提交，审计失败则内容回滚。
-3. 首页对无效 Server Action 的 `POST /` 返回 405（版本 `1336a528`，100% 流量）。
-4. 旧 Blue 库与旧 Worker 版本仅为历史快照，不是无损回退目标；2026-09-29 的隔离远端恢复演练已完成，但线上此后仍有写入，任何再次迁移前必须重新获取最新 Green 数据。
-5. 此候选将应用 schema 契约升至 **15**：新增附件清理队列 `attachment_cleanup_queue`（迁移 `drizzle/0013_bitter_caretaker.sql`），R2 清理失败会持久化入队，管理员经 `/api/attachments?mode=cleanup-queue` 核对对象已删后 resolve。**生产 Green 仍为 schema 14，迁移 0013 前禁止部署新代码**，否则 `migration-only` 会对所有请求 fail fast。
-
-### 提交 `73ad42c`（`fix: harden production delivery and markdown assets`）
+提交 `73ad42c`（`fix: harden production delivery and markdown assets`）已完成：
 
 1. Next 升至 `16.2.11`，React 升至 `19.2.8`。
 2. 通过 `package.json#overrides` 锁定 `postcss@8.5.22`、`sharp@0.35.3`、`@hono/node-server@2.0.11`，生产依赖审计为 **0 漏洞**。
