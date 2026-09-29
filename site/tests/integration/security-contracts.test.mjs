@@ -32,6 +32,25 @@ const draftPayload = (overrides = {}) => ({
   ...overrides,
 });
 
+test("homepage rejects unsupported server action posts without a 500", async () => {
+  const harness = await openTestHarness();
+  try {
+    const form = new FormData();
+    form.append("0", "invalid-action-payload");
+    const response = await harness.dispatch("/", {
+      method: "POST",
+      headers: { "Next-Action": "invalid-action-id" },
+      body: form,
+    });
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get("allow"), "GET, HEAD");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
 test("anonymous cannot create posts, authenticated admin can persist a post", async () => {
   const harness = await openTestHarness();
   try {

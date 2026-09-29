@@ -4,6 +4,7 @@ import { cache } from "react";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
+import { spacePathSql } from "./space-path-sql";
 import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
 import { adminReaderSqlFilter, type AdminReaderContext } from "@/domain/reader/admin-reader-context";
 
@@ -173,14 +174,7 @@ const adminReaderSelection=`SELECT
   p.id,p.public_id AS publicId,p.title,p.slug,p.excerpt,p.content,p.status,
   p.view_count AS viewCount,p.published_at AS publishedAt,p.updated_at AS updatedAt,
   c.name AS categoryName,c.color AS categoryColor,p.space_id AS spaceId,
-  CASE WHEN p.space_id IS NULL THEN NULL ELSE (
-    WITH RECURSIVE ancestors(id,parent_id,name,depth) AS (
-      SELECT id,parent_id,name,0 FROM spaces WHERE id=p.space_id
-      UNION ALL
-      SELECT s.id,s.parent_id,s.name,ancestors.depth+1 FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
-    )
-    SELECT group_concat(name,' / ') FROM (SELECT name FROM ancestors ORDER BY depth DESC)
-  ) END AS spacePath
+  CASE WHEN p.space_id IS NULL THEN NULL ELSE ${spacePathSql} END AS spacePath
   FROM posts p LEFT JOIN categories c ON p.category_id=c.id`;
 
 /** Authenticated reading uses the same shape as public reading without weakening public queries. */
@@ -244,6 +238,7 @@ async function getAdjacentPublishedPost(publishedAt: string | null, id: number, 
 
 export type CursorPost = {
   id: number;
+  version: number;
   publicId: string;
   title: string;
   slug: string;
@@ -323,18 +318,11 @@ async function listPostsByCursor(filters: CursorFilters & { sort: "published" | 
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const statement = env.DB.prepare(`SELECT
-    p.id, p.public_id AS publicId, p.title, p.slug, p.excerpt, p.status, p.featured, p.view_count AS viewCount,
+    p.id, p.version, p.public_id AS publicId, p.title, p.slug, p.excerpt, p.status, p.featured, p.view_count AS viewCount,
     p.published_at AS publishedAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
     c.name AS categoryName, c.slug AS categorySlug, c.color AS categoryColor,
     p.space_id AS spaceId,
-    CASE WHEN p.space_id IS NULL THEN NULL ELSE (
-      WITH RECURSIVE ancestors(id,parent_id,name,depth) AS (
-        SELECT id,parent_id,name,0 FROM spaces WHERE id=p.space_id
-        UNION ALL
-        SELECT s.id,s.parent_id,s.name,ancestors.depth+1 FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
-      )
-      SELECT group_concat(name,' / ') FROM (SELECT name FROM ancestors ORDER BY depth DESC)
-    ) END AS spacePath
+    CASE WHEN p.space_id IS NULL THEN NULL ELSE ${spacePathSql} END AS spacePath
     ${from} ${where}
     ORDER BY ${sortColumn} DESC, p.id DESC
     LIMIT ?`).bind(...params, limit + 1);

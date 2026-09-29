@@ -39,6 +39,7 @@ export type AdminCategory={
 
 export type AdminPost={
   id:number;
+  version:number;
   publicId:string;
   title:string;
   slug:string;
@@ -57,6 +58,7 @@ export type AdminPost={
 export type ArticleForm={
   id?:number;
   publicId?:string;
+  version?:number;
   title:string;
   slug:string;
   excerpt:string;

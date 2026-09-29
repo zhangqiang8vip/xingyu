@@ -55,6 +55,7 @@ test("development and production content stay on isolated databases", async () =
   assert.match(viteConfig, /APP_ENV: appEnvironment/);
   assert.match(viteConfig, /xingyu-development/);
   assert.match(viteConfig, /xingyu-production-preview/);
+  assert.match(viteConfig, /DB_SCHEMA_MODE: "migration-only"/);
   assert.match(bootstrap, /app_environment/);
   assert.doesNotMatch(bootstrap, /INSERT(?:\s+OR\s+\w+)?\s+INTO\s+posts\s*\(/i);
   assert.match(packageJson, /dev:production/);
@@ -72,7 +73,10 @@ test("article routes use stable public ids and retain historical slugs", async (
   assert.match(createRoute, /createPostRecord/);
   assert.match(updateRoute, /updatePostRecord/);
   assert.match(postWrite, /createPostPublicId\(\)/);
-  assert.match(postWrite, /insert\(postSlugHistory\)/);
+  assert.match(postWrite, /INSERT OR IGNORE INTO post_slug_history/);
+  assert.match(postWrite, /const statements = \[history, update, changeCount\]/);
+  assert.match(postWrite, /if \(attachment\) statements\.push\(attachment\)/);
+  assert.match(postWrite, /env\.DB\.batch\(statements\)/);
   assert.match(legacyPage, /permanentRedirect\(postPath\(post\)\)/);
   assert.match(stablePage, /canonicalSlug !== post\.slug/);
   assert.match(pathHelper, /post\.publicId/);
@@ -154,8 +158,8 @@ test("remote MCP separates read approvals from important writes and records rece
   assert.match(mcp, /没有检测到内容变化，未执行写入/);
   assert.match(schema, /mcpActivity = sqliteTable\("mcp_activity"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS mcp_activity/);
-  assert.match(activity, /recordMcpActivity/);
-  assert.match(activity, /recordMcpPageActivity/);
+  assert.match(activity, /preparePostWriteActivity/);
+  assert.match(mcp, /INSERT INTO mcp_activity/);
   assert.match(activity, /listMcpActivity/);
 });
 
@@ -210,7 +214,8 @@ test("admin write routes delegate business rules to server services", async () =
   for (const route of [postRoute, categoryRoute, categoryItemRoute, settingsRoute, pageRoute]) {
     assert.doesNotMatch(route, /drizzle-orm|from\([a-zA-Z]+\)|\.insert\(|\.update\(|\.delete\(/);
   }
-  assert.match(postService, /postSlugHistory/);
+  assert.match(postService, /post_slug_history/);
+  assert.match(postService, /env\.DB\.batch\(statements\)/);
   assert.match(categoryService, /CategoryServiceError/);
   assert.match(siteService, /CONTENT_LIMITS/);
 });
@@ -335,7 +340,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "12"/);
+  assert.match(bootstrap,/schemaVersion = "14"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -381,11 +386,11 @@ test("knowledge-space APIs and MCP expose scoped search with auditable writes", 
   assert.match(mcp,/include_descendants/);
   assert.match(mcp,/visibility: ?post\.spaceId ?\? ?"space" ?: ?"public"/);
   assert.match(mcp,/public_url: post\.status === "published" ?&& ?!post\.spaceId/);
-  assert.match(mcp,/recordSpaceActivitySafely/);
+  assert.match(activity,/prepareSpaceWriteActivity/);
   assert.match(mcp,/activityReceipt\("create_space"/);
   assert.match(mcp,/activityReceipt\("move_space"/);
   assert.match(mcp,/activityReceipt\("delete_space"/);
-  assert.match(activity,/recordMcpSpaceActivity/);
+  assert.match(activity,/changes\(\) >= 1/);
   assert.match(activity,/row\.publicId\.startsWith\("space:"\)/);
 });
 
@@ -455,8 +460,10 @@ test("attachments inherit article visibility and are available to editors and MC
   ]);
   assert.match(schema, /attachments = sqliteTable\("attachments"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS attachments/);
-  assert.match(attachments, /bindMarkdownAttachments/);
+  assert.match(attachments, /prepareMarkdownAttachmentBinding/);
   assert.match(attachments, /deleteAttachment/);
+  assert.match(attachments, /version = version \+ 1/);
+  assert.match(editor, /onPostVersionChange\?\.\(payload\.version\)/);
   assert.match(attachments, /MAX_ATTACHMENT_BYTES = 25 \* 1024 \* 1024/);
   assert.match(uploadRoute, /isAdminRequest/);
   assert.match(uploadRoute, /export async function GET/);

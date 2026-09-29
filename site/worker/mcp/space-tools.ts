@@ -7,7 +7,6 @@ import {
   RECEIPT_OUTPUT_SCHEMA,
   SPACE_SCHEMA,
   activityReceipt,
-  recordSpaceActivitySafely,
   toolFailure,
   toolResult,
   type McpToolContext,
@@ -24,13 +23,13 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
     try {
       requireScope(auth, "xingyu.draft");
       const parentSpace = parent ? await resolveSpace(parent) : null;
-      const created = await createSpace({ name, parentId: parentSpace?.id ?? null });
-      const path = await getSpacePath(created.id);
-      const activity = await recordSpaceActivitySafely({
-        action: "create_space", space: { id: created.id, name: created.name },
-        afterParentId: created.parentId, changedFields: ["name", "parent"], summary: change_summary, clientLabel,
+      const created = await createSpace({ name, parentId: parentSpace?.id ?? null }, {
+        action: "create_space", afterParentId: parentSpace?.id ?? null,
+        changedFields: ["name", "parent"], summary: change_summary, clientLabel,
       });
-      return toolResult({ ok: true, space: { ...created, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("create_space", activity, change_summary, ["name", "parent"]) });
+      const path = await getSpacePath(created.id);
+      const { activity, ...spaceData } = created;
+      return toolResult({ ok: true, space: { ...spaceData, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("create_space", activity, change_summary, ["name", "parent"]) });
     } catch (error) { return toolFailure(error); }
   });
 
@@ -45,18 +44,26 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
       requireScope(auth, "xingyu.publish");
       const current = await resolveSpace(space);
       const parentSpace = typeof parent === "string" ? await resolveSpace(parent) : parent === null ? null : undefined;
-      const updated = await updateSpace(current.id, { name, parentId: parentSpace === undefined ? undefined : parentSpace?.id ?? null });
-      const path = await getSpacePath(updated.id);
       const changedFields = [
         name !== undefined && name.trim() !== current.name ? "name" : null,
         parentSpace !== undefined && (parentSpace?.id ?? null) !== current.parentId ? "parent" : null,
       ].filter((field): field is string => field !== null);
-      const activity = await recordSpaceActivitySafely({
-        action: "update_space", space: { id: updated.id, name: updated.name },
-        beforeParentId: current.parentId, afterParentId: updated.parentId,
+      if (!changedFields.length) {
+        const path = await getSpacePath(current.id);
+        return toolResult({
+          ok: true,
+          space: { ...current, display_path: path.map((item) => item.name).join(" / ") },
+          receipt: { action: "update_space", activity_id: null, summary: "空间没有变化，未执行写入。", changed_fields: [], recorded_at: null },
+        });
+      }
+      const updated = await updateSpace(current.id, { name, parentId: parentSpace === undefined ? undefined : parentSpace?.id ?? null }, {
+        action: "update_space", beforeParentId: current.parentId,
+        afterParentId: parentSpace === undefined ? current.parentId : parentSpace?.id ?? null,
         changedFields, summary: change_summary, clientLabel,
       });
-      return toolResult({ ok: true, space: { ...updated, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("update_space", activity, change_summary, changedFields) });
+      const path = await getSpacePath(updated.id);
+      const { activity, ...spaceData } = updated;
+      return toolResult({ ok: true, space: { ...spaceData, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("update_space", activity, change_summary, changedFields) });
     } catch (error) { return toolFailure(error); }
   });
 
@@ -71,14 +78,21 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
       requireScope(auth, "xingyu.publish");
       const current = await resolveSpace(space);
       const parentSpace = parent === null ? null : await resolveSpace(parent);
-      const updated = await updateSpace(current.id, { parentId: parentSpace?.id ?? null });
-      const path = await getSpacePath(updated.id);
-      const activity = await recordSpaceActivitySafely({
-        action: "move_space", space: { id: updated.id, name: updated.name },
-        beforeParentId: current.parentId, afterParentId: updated.parentId,
+      if ((parentSpace?.id ?? null) === current.parentId) {
+        const path = await getSpacePath(current.id);
+        return toolResult({
+          ok: true,
+          space: { ...current, display_path: path.map((item) => item.name).join(" / ") },
+          receipt: { action: "move_space", activity_id: null, summary: "空间已在目标位置，未执行写入。", changed_fields: [], recorded_at: null },
+        });
+      }
+      const updated = await updateSpace(current.id, { parentId: parentSpace?.id ?? null }, {
+        action: "move_space", beforeParentId: current.parentId, afterParentId: parentSpace?.id ?? null,
         changedFields: ["parent"], summary: change_summary, clientLabel,
       });
-      return toolResult({ ok: true, space: { ...updated, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("move_space", activity, change_summary, ["parent"]) });
+      const path = await getSpacePath(updated.id);
+      const { activity, ...spaceData } = updated;
+      return toolResult({ ok: true, space: { ...spaceData, display_path: path.map((item) => item.name).join(" / ") }, receipt: activityReceipt("move_space", activity, change_summary, ["parent"]) });
     } catch (error) { return toolFailure(error); }
   });
 
@@ -100,18 +114,18 @@ export function registerSpaceTools({ server, clientLabel, auth }: McpToolContext
       const current = await resolveSpace(space);
       const moveTarget = mode === "move" && move_to ? await resolveSpace(move_to) : null;
       if (mode === "move" && !moveTarget) throw new Error("移动内容后删除必须提供 move_to 目标知识空间");
-      const result = await deleteSpace(current.id, { mode, moveTo: moveTarget?.id, confirmName: confirm_name });
       const changedFields = mode === "recursive"
         ? ["space", "descendants", "articles"]
         : mode === "move"
           ? ["space", "children_parent", "article_space"]
           : ["space"];
-      const activity = await recordSpaceActivitySafely({
-        action: "delete_space", space: { id: current.id, name: current.name },
+      const result = await deleteSpace(current.id, { mode, moveTo: moveTarget?.id, confirmName: confirm_name }, {
+        action: "delete_space",
         beforeParentId: current.parentId, changedFields,
         summary: change_summary, clientLabel,
       });
-      return toolResult({ ok: true, result, receipt: activityReceipt("delete_space", activity, change_summary, changedFields) });
+      const { activity, ...resultData } = result;
+      return toolResult({ ok: true, result: resultData, receipt: activityReceipt("delete_space", activity, change_summary, changedFields) });
     } catch (error) { return toolFailure(error); }
   });
 }
