@@ -4,6 +4,7 @@ import "vditor/dist/index.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Vditor from "vditor";
 import { removeAttachmentReference } from "@/domain/attachments/markdown-reference";
+import { mermaidAppearance } from "@/features/markdown/mermaid-theme";
 
 const slashHints = [
   { html: "<b>H1</b><span>一级标题</span>", value: "# 一级标题" },
@@ -154,13 +155,14 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
       const runtime = (window as Window & { mermaid?: { initialize?: (config: Record<string, unknown>) => void; __xingyuConfigured?: boolean } }).mermaid;
       if (!runtime?.initialize || runtime.__xingyuConfigured) return;
       const initialize = runtime.initialize.bind(runtime);
-      runtime.initialize = (config) => initialize({
-        ...config,
-        fontFamily: '"PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif',
-        altFontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif',
-        htmlLabels: false,
-        flowchart: { ...(config.flowchart as Record<string, unknown> ?? {}), htmlLabels: false, useMaxWidth: false, wrappingWidth: 280, nodeSpacing: 34, rankSpacing: 42, padding: 18 },
-      });
+      runtime.initialize = (config) => {
+        const appearance = mermaidAppearance(document.documentElement.dataset.theme === "dark");
+        return initialize({
+          ...config,
+          ...appearance,
+          flowchart: { ...(config.flowchart as Record<string, unknown> ?? {}), ...appearance.flowchart },
+        });
+      };
       runtime.__xingyuConfigured = true;
     };
     // Vditor loads Mermaid itself. Intercept the script's capture-phase load event
