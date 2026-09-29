@@ -36,6 +36,7 @@ export const posts = sqliteTable("posts", {
   status: text("status", { enum: ["draft", "published"] }).notNull().default("draft"),
   featured: integer("featured", { mode: "boolean" }).notNull().default(false),
   viewCount: integer("view_count").notNull().default(0),
+  version: integer("version").notNull().default(1),
   publishedAt: text("published_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -241,5 +242,13 @@ export const oauthRateLimits = sqliteTable("oauth_rate_limits", {
   identifier: text("identifier").primaryKey(),
   attempts: integer("attempts").notNull().default(0),
   windowStarted: integer("window_started").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const adminLoginAttempts = sqliteTable("admin_login_attempts", {
+  identifier: text("identifier").primaryKey(),
+  attempts: integer("attempts").notNull().default(0),
+  windowStarted: integer("window_started").notNull(),
+  blockedUntil: integer("blocked_until").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
 });

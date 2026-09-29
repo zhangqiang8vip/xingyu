@@ -146,6 +146,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
       const body: Record<string, unknown> = {
         view: selectedView,
         public_id: post.publicId,
+        version: post.version,
         title: post.title,
         slug: post.slug,
         status: post.status,

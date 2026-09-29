@@ -2,7 +2,10 @@ import { env } from "cloudflare:workers";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
+import { isUniqueConstraintError } from "./constraint-error";
+import { prepareSpaceWriteActivity, type SpaceWriteAudit } from "./mcp-activity";
 import { posts, spaces } from "./schema";
+import { spacePathSql } from "./space-path-sql";
 
 export type SpaceSummary = {
   id:number;
@@ -102,25 +105,40 @@ export async function getSpace(spaceId:number){
 
 export async function getSpacePath(spaceId:number){
   await ensureDatabase();
-  const result=await env.DB.prepare(`WITH RECURSIVE ancestors(id,parent_id,name,slug,depth) AS (
-      SELECT id,parent_id,name,slug,0 FROM spaces WHERE id=?
-      UNION ALL
-      SELECT s.id,s.parent_id,s.name,s.slug,ancestors.depth+1
-      FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
+  const result=await env.DB.prepare(`WITH RECURSIVE ancestors(id) AS (
+      SELECT id FROM spaces WHERE id=?
+      UNION
+      SELECT s.parent_id FROM spaces s JOIN ancestors ON s.id=ancestors.id
+      WHERE s.parent_id IS NOT NULL
     )
-    SELECT id,parent_id AS parentId,name,slug,depth FROM ancestors ORDER BY depth DESC`)
-    .bind(spaceId).all<{id:number;parentId:number|null;name:string;slug:string;depth:number}>();
-  return result.results??[];
+    SELECT s.id,s.parent_id AS parentId,s.name,s.slug
+    FROM ancestors JOIN spaces s ON s.id=ancestors.id`)
+    .bind(spaceId).all<{id:number;parentId:number|null;name:string;slug:string}>();
+  const byId=new Map((result.results??[]).map((row)=>[row.id,row]));
+  if(!byId.has(spaceId))return [];
+  const path:Array<{id:number;parentId:number|null;name:string;slug:string;depth:number}>=[];
+  const seen=new Set<number>();
+  let current:number|null=spaceId;
+  while(current!==null){
+    if(seen.has(current))throw new SpaceWriteError("空间层级形成循环，请先修复数据",409);
+    seen.add(current);
+    const row=byId.get(current);
+    if(!row)throw new SpaceWriteError("空间父级不存在，请先修复数据",409);
+    path.push({...row,depth:path.length});
+    current=row.parentId;
+  }
+  return path.reverse();
 }
 
 export async function getSpaceDescendantIds(spaceId:number,includeSelf=true){
   await ensureDatabase();
-  const result=await env.DB.prepare(`WITH RECURSIVE descendants(id,depth) AS (
-      SELECT id,0 FROM spaces WHERE id=?
-      UNION ALL
-      SELECT s.id,descendants.depth+1 FROM spaces s JOIN descendants ON s.parent_id=descendants.id
+  const result=await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (
+      SELECT id FROM spaces WHERE id=?
+      UNION
+      SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
     )
-    SELECT id FROM descendants ${includeSelf?"":"WHERE depth>0"}`).bind(spaceId).all<{id:number}>();
+    SELECT id FROM descendants ${includeSelf?"":"WHERE id<>?"}`)
+    .bind(...(includeSelf?[spaceId]:[spaceId,spaceId])).all<{id:number}>();
   return (result.results??[]).map((row)=>row.id);
 }
 
@@ -132,7 +150,7 @@ export async function getSpaceOverview(spaceId:number){
     listSpaceChildren(spaceId),
     env.DB.prepare(`WITH RECURSIVE descendants(id) AS (
         SELECT id FROM spaces WHERE id=?
-        UNION ALL
+        UNION
         SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
       )
       SELECT
@@ -151,7 +169,7 @@ async function assertParent(parentId:number|null,excludeId?:number){
   if(excludeId){
     const descendant=await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (
         SELECT id FROM spaces WHERE parent_id=?
-        UNION ALL
+        UNION
         SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
       ) SELECT id FROM descendants WHERE id=? LIMIT 1`)
       .bind(excludeId,parentId).first<{id:number}>();
@@ -168,7 +186,23 @@ async function assertUniqueSpaceName(parentId:number|null,name:string,excludeId?
   if(result)throw new SpaceWriteError("同一层级下已存在同名空间",409);
 }
 
-export async function createSpace(input:{name:string;slug?:string;parentId?:number|null;sortOrder?:number}){
+// Keep the ancestry check in the write statement as well as the friendly
+// preflight: another request may reparent the destination between the two.
+const outsideSubtree = `NOT EXISTS (
+  WITH RECURSIVE descendants(id) AS (
+    SELECT id FROM spaces WHERE id=?
+    UNION
+    SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
+  ) SELECT 1 FROM descendants WHERE id=?
+)`;
+
+function spaceActivity(result: D1Result | undefined) {
+  const row = result?.results?.[0] as { id?: number; created_at?: string } | undefined;
+  if (!row?.id || !row.created_at) throw new Error("MCP space audit receipt is missing");
+  return { id: row.id, createdAt: row.created_at };
+}
+
+export async function createSpace(input:{name:string;slug?:string;parentId?:number|null;sortOrder?:number},audit?:SpaceWriteAudit){
   await ensureDatabase();
   const name=input.name.trim();
   if(!name)throw new SpaceWriteError("空间名称不能为空");
@@ -177,18 +211,26 @@ export async function createSpace(input:{name:string;slug?:string;parentId?:numb
   await assertParent(parentId);
   await assertUniqueSpaceName(parentId,name);
   try{
-    const [created]=await getDb().insert(spaces).values({
-      name,slug:slugifySpace(input.slug||name),parentId,sortOrder:input.sortOrder??0,
-    }).returning();
+    const insert=env.DB.prepare(`INSERT INTO spaces (name,slug,parent_id,sort_order)
+      SELECT ?,?,?,? WHERE ? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id=?)
+      RETURNING id`).bind(name,slugifySpace(input.slug||name),parentId,input.sortOrder??0,parentId,parentId);
+    const results=audit?await env.DB.batch([insert,prepareSpaceWriteActivity(env.DB,{name},audit)]):null;
+    const inserted=results?(results[0]?.results?.[0] as {id:number}|undefined):await insert.first<{id:number}>();
+    if(!inserted)throw new SpaceWriteError("父空间已不存在，请刷新后重试",409);
+    const created=await getSpace(inserted.id);
     if(!created)throw new SpaceWriteError("空间创建失败",409);
-    return created;
+    return {...created,activity:results?spaceActivity(results[1]):undefined};
   }catch(error){
     if(error instanceof SpaceWriteError)throw error;
-    throw new SpaceWriteError("同一层级下已存在相同空间",409);
+    if(isUniqueConstraintError(error,"spaces.slug")
+      ||isUniqueConstraintError(error,"spaces.parent_id, spaces.slug")){
+      throw new SpaceWriteError("同一层级下已存在相同空间",409);
+    }
+    throw error;
   }
 }
 
-export async function updateSpace(spaceId:number,input:{name?:string;slug?:string;parentId?:number|null;sortOrder?:number}){
+export async function updateSpace(spaceId:number,input:{name?:string;slug?:string;parentId?:number|null;sortOrder?:number},audit?:SpaceWriteAudit){
   await ensureDatabase();
   const current=await getSpace(spaceId);
   if(!current)throw new SpaceWriteError("空间不存在",404);
@@ -199,20 +241,30 @@ export async function updateSpace(spaceId:number,input:{name?:string;slug?:strin
   await assertParent(parentId,spaceId);
   await assertUniqueSpaceName(parentId,name,spaceId);
   try{
-    const [updated]=await getDb().update(spaces).set({
-      name,
-      slug:input.slug===undefined?current.slug:slugifySpace(input.slug||name),
-      parentId,
-      sortOrder:input.sortOrder??current.sortOrder,
-      updatedAt:new Date().toISOString(),
-    }).where(eq(spaces.id,spaceId)).returning();
-    return updated;
-  }catch{
-    throw new SpaceWriteError("目标层级下已存在同名空间",409);
+    const update=env.DB.prepare(`UPDATE spaces SET
+      name=?,slug=?,parent_id=?,sort_order=?,updated_at=?
+      WHERE id=? AND (? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id=?))
+      AND (? IS NULL OR ${outsideSubtree})
+      RETURNING id`).bind(name,input.slug===undefined?current.slug:slugifySpace(input.slug||name),
+      parentId,input.sortOrder??current.sortOrder,new Date().toISOString(),spaceId,
+      parentId,parentId,parentId,spaceId,parentId);
+    const results=audit?await env.DB.batch([update,prepareSpaceWriteActivity(env.DB,{id:spaceId,name},audit)]):null;
+    const changed=results?(results[0]?.results?.[0] as {id:number}|undefined):await update.first<{id:number}>();
+    if(!changed)throw new SpaceWriteError("父空间已不存在或当前空间已被删除，请刷新后重试",409);
+    const updated=await getSpace(changed.id);
+    if(!updated)throw new SpaceWriteError("空间已被删除，请刷新后重试",409);
+    return {...updated,activity:results?spaceActivity(results[1]):undefined};
+  }catch(error){
+    if(error instanceof SpaceWriteError)throw error;
+    if(isUniqueConstraintError(error,"spaces.slug")
+      ||isUniqueConstraintError(error,"spaces.parent_id, spaces.slug")){
+      throw new SpaceWriteError("目标层级下已存在同名空间",409);
+    }
+    throw error;
   }
 }
 
-export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"recursive";moveTo?:number|null;confirmName?:string}){
+export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"recursive";moveTo?:number|null;confirmName?:string},audit?:SpaceWriteAudit){
   await ensureDatabase();
   const current=await getSpace(spaceId);
   if(!current)throw new SpaceWriteError("空间不存在",404);
@@ -221,7 +273,17 @@ export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"rec
     getDb().select({value:sql<number>`count(*)`}).from(posts).where(eq(posts.spaceId,spaceId)),
   ]);
   const directArticles=Number(articleCount[0]?.value??0);
-  if(input.mode==="empty"&&(children.length||directArticles))throw new SpaceWriteError("空间中仍有子空间或文章，请先移动内容",409);
+  if(input.mode==="empty"){
+    if(children.length||directArticles)throw new SpaceWriteError("空间中仍有子空间或文章，请先移动内容",409);
+    const deletion=env.DB.prepare(`DELETE FROM spaces WHERE id=?
+      AND NOT EXISTS (SELECT 1 FROM spaces WHERE parent_id=?)
+      AND NOT EXISTS (SELECT 1 FROM posts WHERE space_id=?)`)
+      .bind(spaceId,spaceId,spaceId);
+    const results=audit?await env.DB.batch([deletion,prepareSpaceWriteActivity(env.DB,{id:spaceId,name:current.name},audit)]):null;
+    const deleted=results?results[0]:await deletion.run();
+    if(deleted.meta.changes!==1)throw new SpaceWriteError("空间已变化，请刷新后重试",409);
+    return {ok:true,deleted:1,activity:results?spaceActivity(results[1]):undefined};
+  }
   if(input.mode==="move"){
     const moveTo=input.moveTo??null;
     if(moveTo===null)throw new SpaceWriteError("请选择另一个知识空间接收内容，空间文章不能移动到知识空间根层",409);
@@ -233,18 +295,33 @@ export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"rec
       WHERE child.parent_id=?
       LIMIT 1`).bind(moveTo,spaceId).first<{name:string}>();
     if(collision)throw new SpaceWriteError(`接收空间中已存在与“${collision.name}”同名或同 Slug 的子空间`,409);
-    await env.DB.batch([
-      env.DB.prepare("UPDATE spaces SET parent_id=?, updated_at=CURRENT_TIMESTAMP WHERE parent_id=?").bind(moveTo,spaceId),
-      env.DB.prepare("UPDATE posts SET space_id=?, updated_at=CURRENT_TIMESTAMP WHERE space_id=?").bind(moveTo,spaceId),
-      env.DB.prepare("DELETE FROM spaces WHERE id=?").bind(spaceId),
-    ]);
-    return {ok:true,deleted:1};
+    const statements=[
+      env.DB.prepare(`UPDATE spaces SET parent_id=?, updated_at=CURRENT_TIMESTAMP
+        WHERE parent_id=? AND EXISTS (SELECT 1 FROM spaces WHERE id=?)
+        AND ${outsideSubtree}`).bind(moveTo,spaceId,moveTo,spaceId,moveTo),
+      env.DB.prepare(`UPDATE posts SET space_id=?, updated_at=CURRENT_TIMESTAMP, version=version+1
+        WHERE space_id=? AND EXISTS (SELECT 1 FROM spaces WHERE id=?)
+        AND ${outsideSubtree}`).bind(moveTo,spaceId,moveTo,spaceId,moveTo),
+      env.DB.prepare(`DELETE FROM spaces WHERE id=? AND EXISTS (SELECT 1 FROM spaces WHERE id=?)
+        AND NOT EXISTS (SELECT 1 FROM spaces WHERE parent_id=?)
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE space_id=?)
+        AND ${outsideSubtree}`)
+        .bind(spaceId,moveTo,spaceId,spaceId,spaceId,moveTo),
+      // D1 batch rolls back on a statement error. A zero-row final delete must
+      // not commit earlier child/article moves, even for non-MCP callers.
+      env.DB.prepare("SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('!', '$') END AS guard"),
+    ];
+    if(audit)statements.push(prepareSpaceWriteActivity(env.DB,{id:spaceId,name:current.name},audit));
+    const results=await env.DB.batch(statements);
+    if(results[2]?.meta.changes!==1)throw new SpaceWriteError("接收空间或当前空间已变化，请刷新后重试",409);
+    return {ok:true,deleted:1,activity:audit?spaceActivity(results[4]):undefined};
   }
   if(input.mode==="recursive"){
     if(input.confirmName!==current.name)throw new SpaceWriteError("请输入空间名称确认递归删除");
+    await getSpacePath(spaceId);
     const counts=await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (
         SELECT id FROM spaces WHERE id=?
-        UNION ALL
+        UNION
         SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
       )
       SELECT
@@ -253,7 +330,7 @@ export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"rec
       .bind(spaceId).first<{spaceCount:number;articleCount:number}>();
     const subtree=`WITH RECURSIVE descendants(id) AS (
       SELECT id FROM spaces WHERE id=?
-      UNION ALL
+      UNION
       SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
     )`;
     const statements=[
@@ -266,14 +343,19 @@ export async function deleteSpace(spaceId:number,input:{mode:"empty"|"move"|"rec
       env.DB.prepare(`${subtree} DELETE FROM post_preview_tokens WHERE post_id IN (
         SELECT id FROM posts WHERE space_id IN (SELECT id FROM descendants)
       )`).bind(spaceId),
+      env.DB.prepare(`${subtree} UPDATE attachments SET post_id=NULL WHERE post_id IN (
+        SELECT id FROM posts WHERE space_id IN (SELECT id FROM descendants)
+      )`).bind(spaceId),
       env.DB.prepare(`${subtree} DELETE FROM posts WHERE space_id IN (SELECT id FROM descendants)`).bind(spaceId),
       env.DB.prepare(`${subtree} DELETE FROM spaces WHERE id IN (SELECT id FROM descendants)`).bind(spaceId),
+      env.DB.prepare("SELECT CASE WHEN changes() >= 1 THEN 1 ELSE json_extract('!', '$') END AS guard"),
     ];
-    await env.DB.batch(statements);
-    return {ok:true,deleted:Number(counts?.spaceCount??0),deletedArticles:Number(counts?.articleCount??0)};
+    if(audit)statements.push(prepareSpaceWriteActivity(env.DB,{id:spaceId,name:current.name},audit));
+    const results=await env.DB.batch(statements);
+    return {ok:true,deleted:Number(counts?.spaceCount??0),deletedArticles:Number(counts?.articleCount??0),
+      activity:audit?spaceActivity(results.at(-1)):undefined};
   }
-  await getDb().delete(spaces).where(eq(spaces.id,spaceId));
-  return {ok:true,deleted:1};
+  throw new SpaceWriteError("不支持的空间删除方式");
 }
 
 export async function resolveSpace(reference:string|number){
@@ -313,7 +395,7 @@ export async function searchSpaces(query:string,limit=20,options?:{rootId?:numbe
     range=`s.id IN (
       WITH RECURSIVE descendants(id) AS (
         SELECT id FROM spaces WHERE parent_id=?
-        UNION ALL
+        UNION
         SELECT child.id FROM spaces child JOIN descendants ON child.parent_id=descendants.id
       )
       SELECT id FROM descendants
@@ -343,7 +425,7 @@ export async function listSpacePosts(input:{spaceId:number;includeDescendants?:b
     ? `p.space_id IN (
         WITH RECURSIVE descendants(id) AS (
           SELECT id FROM spaces WHERE id=?
-          UNION ALL
+          UNION
           SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
         )
         SELECT id FROM descendants
@@ -371,14 +453,7 @@ export async function listSpacePosts(input:{spaceId:number;includeDescendants?:b
       p.id,p.public_id AS publicId,p.title,p.slug,p.excerpt,p.status,p.featured,
       p.view_count AS viewCount,p.published_at AS publishedAt,p.updated_at AS updatedAt,
       p.category_id AS categoryId,c.name AS categoryName,c.color AS categoryColor,p.space_id AS spaceId,
-      (
-        WITH RECURSIVE ancestors(id,parent_id,name,depth) AS (
-          SELECT id,parent_id,name,0 FROM spaces WHERE id=p.space_id
-          UNION ALL
-          SELECT s.id,s.parent_id,s.name,ancestors.depth+1 FROM spaces s JOIN ancestors ON s.id=ancestors.parent_id
-        )
-        SELECT group_concat(name,' / ') FROM (SELECT name FROM ancestors ORDER BY depth DESC)
-      ) AS spacePath
+      ${spacePathSql} AS spacePath
     ${from}
     WHERE ${conditions.join(" AND ")}
     ORDER BY p.updated_at DESC,p.id DESC LIMIT ?`).bind(...params,limit+1).all<SpacePostRow>();

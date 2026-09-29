@@ -22,7 +22,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...payload,
       spaceId:Object.prototype.hasOwnProperty.call(payload,"spaceId")?payload.spaceId:current.spaceId,
     });
-    const post = await updatePostRecord(Number(id), input);
+    const post = await updatePostRecord(Number(id), input, payload.version as number);
     return Response.json({ post });
   } catch (error) {
     if (error instanceof PostWriteError) {
@@ -35,6 +35,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAdminRequest(request))) return unauthorized();
   const { id } = await params;
-  await deleteAdminPost(Number(id));
-  return Response.json({ ok: true });
+  const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
+  try {
+    await deleteAdminPost(Number(id), payload.version as number);
+    return Response.json({ ok: true });
+  } catch (error) {
+    if (error instanceof PostWriteError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    return Response.json({ error: "文章删除失败，数据未修改" }, { status: 500 });
+  }
 }

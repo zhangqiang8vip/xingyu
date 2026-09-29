@@ -24,7 +24,7 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 type AttachmentItem={id:string;name:string;contentType:string;size:number;createdAt:string;url:string;markdown:string};
 type UploadNotice={kind:"success"|"error";title:string;detail:string};
 
-export default function VditorEditor({ value, onChange, previewMode="both", autoFocus=false, attachments=false, postId }: { value: string; onChange: (value: string) => void; previewMode?:"both"|"editor"; autoFocus?:boolean; attachments?:boolean; postId?:number }) {
+export default function VditorEditor({ value, onChange, previewMode="both", autoFocus=false, attachments=false, postId, postVersion, onPostVersionChange }: { value: string; onChange: (value: string) => void; previewMode?:"both"|"editor"; autoFocus?:boolean; attachments?:boolean; postId?:number; postVersion?:number; onPostVersionChange?:(version:number)=>void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Vditor | null>(null);
   const changeRef = useRef(onChange);
@@ -119,9 +119,13 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
   const deleteManagedAttachment=useCallback(async(item:AttachmentItem)=>{
     setManagerMessage("");
     try {
-      const response=await fetch(`/api/attachments/${item.id}`,{method:"DELETE"});
+      const response=await fetch(`/api/attachments/${item.id}`,{
+        method:"DELETE",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({version:postVersion}),
+      });
       const payload=await readAttachmentResponse(response);
       if(!response.ok)throw new Error(uploadErrorDetail(response.status,payload.error));
+      if(typeof payload.version==="number")onPostVersionChange?.(payload.version);
       setAttachmentItems((current)=>current.filter((entry)=>entry.id!==item.id));
       setDeleteCandidate(null);
       const editor=editorRef.current;
@@ -136,7 +140,7 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
       setManagerMessage(detail);
       setNotice({kind:"error",title:"附件删除失败",detail});
     }
-  },[]);
+  },[postVersion,onPostVersionChange]);
 
   useEffect(() => {
     let disposed = false;
@@ -280,7 +284,7 @@ export default function VditorEditor({ value, onChange, previewMode="both", auto
 }
 
 async function readAttachmentResponse(response:Response){
-  try{return await response.json() as {id?:string;markdown?:string;attachment?:AttachmentItem;attachments?:AttachmentItem[];error?:string}}
+  try{return await response.json() as {id?:string;markdown?:string;attachment?:AttachmentItem;attachments?:AttachmentItem[];error?:string;version?:number|null}}
   catch{return {error:response.ok?"服务器返回了无法识别的数据":"服务器没有返回错误详情"}}
 }
 

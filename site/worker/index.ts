@@ -42,6 +42,12 @@ const worker = {
     const requestStartedAt = performance.now();
     const url = new URL(request.url);
     const identityBearing=hasRequestIdentity(request);
+    if (url.pathname === "/" && request.method === "POST") {
+      return addSecurityHeaders(new Response(null, {
+        status: 405,
+        headers: { "Allow": "GET, HEAD", "Cache-Control": "no-store" },
+      }), url, false, null, identityBearing, false);
+    }
     const htmlDocument=isHtmlDocumentRequest(request);
     const cacheable = isPublicDocumentRequest(request, url);
     const revisionStartedAt=performance.now();

@@ -1,9 +1,18 @@
-import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listPostAttachments } from "../../../db/attachments";
+import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listAttachmentOrphanCandidates, listPostAttachments } from "../../../db/attachments";
 import { isAdminRequest, unauthorized } from "../admin-auth";
+import { AttachmentCleanupRequiredError } from "../../../db/attachment-cleanup";
 
 export async function GET(request: Request) {
   if (!(await isAdminRequest(request))) return unauthorized();
-  const postIdValue = new URL(request.url).searchParams.get("postId");
+  const params = new URL(request.url).searchParams;
+  if (params.get("mode") === "orphan-candidates") {
+    const cursor = params.get("cursor") ?? undefined;
+    if (cursor && cursor.length > 2048) {
+      return Response.json({ error: "游标无效" }, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
+    return Response.json(await listAttachmentOrphanCandidates(cursor), { headers: { "Cache-Control": "no-store" } });
+  }
+  const postIdValue = params.get("postId");
   if (!postIdValue || !/^\d+$/.test(postIdValue)) {
     return Response.json({ error: "请选择要管理附件的文章" }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
@@ -18,7 +27,12 @@ export async function POST(request: Request) {
     const file = form.get("file");
     if (!(file instanceof File)) return Response.json({ error: "请选择附件" }, { status: 400 });
     const postIdValue = form.get("postId");
-    const postId = typeof postIdValue === "string" && /^\d+$/.test(postIdValue) ? Number(postIdValue) : null;
+    if (postIdValue !== null && (typeof postIdValue !== "string"
+      || !/^[1-9]\d*$/.test(postIdValue)
+      || !Number.isSafeInteger(Number(postIdValue)))) {
+      throw new AttachmentError("文章标识无效");
+    }
+    const postId = postIdValue === null ? null : Number(postIdValue);
     const bytes = new Uint8Array(await file.arrayBuffer());
     const record = await createAttachment({
       name: file.name,
@@ -31,6 +45,10 @@ export async function POST(request: Request) {
     // exposing a named payload for the attachment manager.
     return Response.json({ ...attachment, attachment }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof AttachmentCleanupRequiredError) {
+      return Response.json({ error: error.message, attachmentId: error.publicId },
+        { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
     if (error instanceof AttachmentError) {
       return Response.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
     }
