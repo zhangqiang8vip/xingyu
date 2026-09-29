@@ -80,6 +80,21 @@ export const attachments = sqliteTable("attachments", {
   index("attachments_post_created_idx").on(table.postId, table.createdAt, table.id),
 ]);
 
+export const attachmentCleanupQueue = sqliteTable("attachment_cleanup_queue", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  publicId: text("public_id"),
+  objectKey: text("object_key").notNull(),
+  operation: text("operation").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("attachment_cleanup_queue_object_key_uidx").on(table.objectKey),
+  index("attachment_cleanup_queue_status_idx").on(table.status, table.createdAt, table.id),
+]);
+
 export const postPreviewTokens = sqliteTable("post_preview_tokens", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   postId: integer("post_id").notNull(),
