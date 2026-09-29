@@ -294,8 +294,15 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
   assert.match(katexStyles, /katex\/dist\/katex\.min\.css/);
   assert.doesNotMatch(rootLayout, /katex\/dist\/katex\.min\.css/);
   assert.match(renderer, /MarkdownMermaid/);
+  assert.match(renderer, /memo\(function MarkdownRenderer/);
   assert.match(mermaid, /import\("mermaid"\)/);
   assert.doesNotMatch(mermaid, /cdn\.jsdelivr/);
+  assert.match(mermaid, /mermaidAppearance/);
+  assert.match(mermaid, /showModal\(\)/);
+  assert.match(mermaid, /拖动或 Shift \+ 滚轮查看全图/);
+  assert.match(mermaid, /setPointerCapture/);
+  assert.match(mermaid, /passive: false/);
+  assert.match(mermaid, /container\.scrollLeft/);
   assert.match(post, /MarkdownRenderer/);
   assert.match(modal, /MarkdownRenderer/);
   assert.match(bridge, /MarkdownRenderer/);
@@ -303,8 +310,8 @@ test("Markdown Plus is rendered through one safe, shared pipeline", async () => 
 });
 
 test("admin and markdown editor share the site theme palette", async () => {
-  const [publicStyles,adminStyles,editor,toggle]=await Promise.all([
-    source("app/globals.css"),source("app/admin/admin.css"),source("features/admin/VditorEditor.tsx"),source("features/navigation/ThemeToggle.tsx"),
+  const [publicStyles,adminStyles,editor,toggle,mermaidTheme]=await Promise.all([
+    source("app/globals.css"),source("app/admin/admin.css"),source("features/admin/VditorEditor.tsx"),source("features/navigation/ThemeToggle.tsx"),source("features/markdown/mermaid-theme.ts"),
   ]);
   const styles=`${publicStyles}\n${adminStyles}`;
   assert.match(styles,/--admin-canvas:/);
@@ -320,7 +327,11 @@ test("admin and markdown editor share the site theme palette", async () => {
   assert.match(editor,/vditor--dark/);
   assert.match(editor,/MutationObserver/);
   assert.match(editor,/vditorMermaidScript/);
-  assert.match(editor,/wrappingWidth: 280/);
+  assert.match(editor,/mermaidAppearance/);
+  assert.match(mermaidTheme,/clusterBkg/);
+  assert.match(mermaidTheme,/clusterBorder/);
+  assert.match(mermaidTheme,/wrappingWidth: 220/);
+  assert.match(publicStyles,/\.mermaid-dialog-canvas/);
   assert.match(toggle,/xingyu:theme-change/);
 });
 
@@ -340,7 +351,7 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "14"/);
+  assert.match(bootstrap,/schemaVersion = "15"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);

@@ -1,4 +1,4 @@
-import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listAttachmentOrphanCandidates, listPostAttachments } from "../../../db/attachments";
+import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listAttachmentOrphanCandidates, listPostAttachments, listCleanupQueueItems, resolveCleanupQueueItem } from "../../../db/attachments";
 import { isAdminRequest, unauthorized } from "../admin-auth";
 import { AttachmentCleanupRequiredError } from "../../../db/attachment-cleanup";
 
@@ -12,6 +12,14 @@ export async function GET(request: Request) {
     }
     return Response.json(await listAttachmentOrphanCandidates(cursor), { headers: { "Cache-Control": "no-store" } });
   }
+  if (params.get("mode") === "cleanup-queue") {
+    const limitValue = params.get("limit");
+    const limit = limitValue === null ? undefined : Number(limitValue);
+    if (limitValue !== null && (!/^\d+$/.test(limitValue) || !Number.isSafeInteger(limit))) {
+      return Response.json({ error: "数量参数无效" }, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
+    return Response.json({ items: await listCleanupQueueItems(limit) }, { headers: { "Cache-Control": "no-store" } });
+  }
   const postIdValue = params.get("postId");
   if (!postIdValue || !/^\d+$/.test(postIdValue)) {
     return Response.json({ error: "请选择要管理附件的文章" }, { status: 400, headers: { "Cache-Control": "no-store" } });
@@ -23,6 +31,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!(await isAdminRequest(request))) return unauthorized();
   try {
+    if (request.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+      return await handleCleanupResolve(request);
+    }
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return Response.json({ error: "请选择附件" }, { status: 400 });
@@ -67,6 +78,30 @@ function attachmentPayload(record: { publicId: string; originalName: string; con
     url: attachmentUrl(record),
     markdown: attachmentMarkdown(record),
   };
+}
+
+async function handleCleanupResolve(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "请求体不是有效的 JSON" }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  const objectKey = (body as { objectKey?: unknown })?.objectKey;
+  if (typeof objectKey !== "string"
+    || !/^attachments\/\d{4}\/\d{2}\/att_[a-f0-9]{32}\//.test(objectKey)
+    || objectKey.length > 1024) {
+    return Response.json({ error: "对象键无效，请按精确键提交" }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  try {
+    return Response.json(await resolveCleanupQueueItem(objectKey), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AttachmentError) {
+      return Response.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+    }
+    console.error("attachment cleanup resolve failed", error);
+    return Response.json({ error: "回收确认暂时不可用，请稍后重试" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
 }
 
 function fallbackContentType(name: string) {

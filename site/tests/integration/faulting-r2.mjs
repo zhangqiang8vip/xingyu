@@ -12,6 +12,15 @@ export default class FaultingR2 extends WorkerEntrypoint {
     throw new Error("injected R2 delete failure");
   }
 
+  async head(key) {
+    const object = await this.env.STORAGE.head(key);
+    return object ? { key, size: object.size, uploaded: object.uploaded } : null;
+  }
+
+  async get(key, options) {
+    return this.env.STORAGE.get(key, options);
+  }
+
   async list(options) {
     const page = await this.env.STORAGE.list(options);
     return {
