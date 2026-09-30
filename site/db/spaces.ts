@@ -54,12 +54,13 @@ export async function listSpaceChildren(parentId:number|null){
     ORDER BY s.sort_order ASC, s.name COLLATE NOCASE ASC, s.id ASC`)
     .bind(parentId,parentId).all<SpaceSummary>();
   const rows=(result.results??[]).map((row)=>({...row,childCount:Number(row.childCount),articleCount:Number(row.articleCount)}));
-  if(parentId!==null||!rows.length)return rows;
-  // Root cards represent whole knowledge domains, so their count and activity
-  // include every descendant without loading the tree into the browser.
+  if(!rows.length)return rows;
+  // Every tree node represents its whole subtree. Keep articleCount as the
+  // direct count for callers that explicitly show direct articles.
   const totals=await env.DB.prepare(`WITH RECURSIVE hierarchy(root_id,id,updated_at) AS (
-      SELECT id,id,updated_at FROM spaces WHERE parent_id IS NULL
-      UNION ALL
+      SELECT id,id,updated_at FROM spaces
+      WHERE ((? IS NULL AND parent_id IS NULL) OR parent_id=?)
+      UNION
       SELECT hierarchy.root_id,child.id,child.updated_at
       FROM spaces child JOIN hierarchy ON child.parent_id=hierarchy.id
     )
@@ -71,7 +72,7 @@ export async function listSpaceChildren(parentId:number|null){
       END) AS latestActivityAt
     FROM hierarchy
     LEFT JOIN posts ON posts.space_id=hierarchy.id
-    GROUP BY hierarchy.root_id`).all<{rootId:number;totalArticleCount:number;latestActivityAt:string}>();
+    GROUP BY hierarchy.root_id`).bind(parentId,parentId).all<{rootId:number;totalArticleCount:number;latestActivityAt:string}>();
   const byRoot=new Map((totals.results??[]).map((row)=>[row.rootId,row]));
   return rows.map((row)=>{
     const total=byRoot.get(row.id);

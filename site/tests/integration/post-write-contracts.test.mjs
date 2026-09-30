@@ -348,6 +348,49 @@ test("creating a child and deleting its parent cannot both succeed", async () =>
   }
 });
 
+test("space tree counts include articles in every descendant", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const createSpace = async (name, parentId) => {
+      const response = await jsonRequest(harness, "/api/spaces", {
+        method: "POST", cookie, body: { name, parentId },
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+      return (await response.json()).space.id;
+    };
+    const rootId = await createSpace("Count root", null);
+    const childId = await createSpace("Count child", rootId);
+    const grandchildId = await createSpace("Count grandchild", childId);
+    const otherRootId = await createSpace("Other count root", null);
+    for (const [slug, spaceId] of [["count-child-post", childId], ["count-grandchild-post", grandchildId]]) {
+      const response = await jsonRequest(harness, "/api/posts", {
+        method: "POST", cookie, body: { ...payload(slug, "private body"), spaceId },
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+    }
+
+    const rootsResponse = await jsonRequest(harness, "/api/spaces?parent=root", { cookie });
+    assert.equal(rootsResponse.status, 200);
+    const roots = (await rootsResponse.json()).spaces;
+    assert.deepEqual(
+      [roots.find((space) => space.id === rootId)?.articleCount,
+        roots.find((space) => space.id === rootId)?.totalArticleCount,
+        roots.find((space) => space.id === otherRootId)?.totalArticleCount],
+      [0, 2, 0],
+    );
+
+    const childrenResponse = await jsonRequest(harness, `/api/spaces?parent=${rootId}`, { cookie });
+    assert.equal(childrenResponse.status, 200);
+    const [child] = (await childrenResponse.json()).spaces;
+    assert.equal(child.id, childId);
+    assert.equal(child.articleCount, 1);
+    assert.equal(child.totalArticleCount, 2);
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
 test("space editing still updates its hierarchy and rejects a missing parent", async () => {
   const harness = await openTestHarness();
   try {

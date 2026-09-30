@@ -226,7 +226,7 @@ html[data-theme="dark"] .writing-studio-actions button{color:#fff;background:#0a
 .admin-desktop-utility{margin-top:16px}
 .admin-more,.admin-dock{display:none}
 .admin-workspace{min-width:0}
-.admin-workspace-bar{position:sticky;z-index:30;top:0;padding:16px 44px 0;display:flex;justify-content:flex-end}
+.admin-workspace-bar{position:sticky;z-index:30;top:0;padding:16px 44px 0;display:flex;justify-content:center}
 .admin-workspace-bar .admin-article-search{position:relative;width:min(320px,100%)}
 .admin-workspace-bar .admin-article-search-trigger{width:100%;height:36px;padding:0 12px;border-radius:11px;background:var(--admin-panel);box-shadow:none}
 .admin-workspace-bar .admin-article-search.active{z-index:40;width:min(560px,calc(100vw - 280px))}
