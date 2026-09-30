@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { slugify, type PostPayload } from "@/domain/posts/post-input";
-import { createPostRecord, PostWriteError, updatePostRecord } from "../../db/post-write";
-import { getSpacePath, resolveSpace } from "../../db/spaces";
+import { createPostRecord, PostWriteError, updatePostRecord } from "@/db/post-write";
+import { getSpacePath, resolveSpace } from "@/db/spaces";
 import {
   AttachmentError,
   MAX_MCP_ATTACHMENT_BYTES,
   attachmentMarkdown,
   attachmentUrl,
   createAttachment,
-} from "../../db/attachments";
+} from "@/db/attachments";
 import { requireScope } from "../mcp-auth";
 import { scopeForAttachment, scopeForPostWrite } from "./scope-policy";
 import {

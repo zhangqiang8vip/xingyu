@@ -1,6 +1,6 @@
-import { isAdminRequest, unauthorized } from "../../../admin-auth";
-import { listAdminPosts } from "../../../../../db/queries";
-import { getSpace, listSpacePosts } from "../../../../../db/spaces";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
+import { listAdminPosts } from "@/db/queries";
+import { getSpace, listSpacePosts } from "@/db/spaces";
 
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
   if(!(await isAdminRequest(request)))return unauthorized();

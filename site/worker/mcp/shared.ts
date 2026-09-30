@@ -1,11 +1,11 @@
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getDb } from "../../db";
-import { ensureDatabase } from "../../db/bootstrap";
-import { listMcpActivity, type McpActivityAction } from "../../db/mcp-activity";
-import { getWritablePost, PostWriteError } from "../../db/post-write";
-import { categories } from "../../db/schema";
+import { getDb } from "@/db";
+import { ensureDatabase } from "@/db/bootstrap";
+import { listMcpActivity, type McpActivityAction } from "@/db/mcp-activity";
+import { getWritablePost, PostWriteError } from "@/db/post-write";
+import { categories } from "@/db/schema";
 import { scopeFailure, type McpAuth } from "../mcp-auth";
 
 export const IDENTIFIER_SCHEMA = z.string().trim().min(1).max(180)

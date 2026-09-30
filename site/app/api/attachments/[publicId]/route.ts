@@ -1,5 +1,5 @@
-import { AttachmentError, deleteAttachment } from "../../../../db/attachments";
-import { isAdminRequest, unauthorized } from "../../admin-auth";
+import { AttachmentError, deleteAttachment } from "@/db/attachments";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
 
 export async function DELETE(request: Request, context: { params: Promise<{ publicId: string }> }) {
   if (!(await isAdminRequest(request))) return unauthorized();

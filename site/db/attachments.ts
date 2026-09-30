@@ -75,15 +75,17 @@ export async function createAttachment(input: {
   });
 
   const postId = input.postId ?? null;
+  // Same UTC layout as SQLite CURRENT_TIMESTAMP so expiry comparisons stay consistent.
+  const unboundAt = postId === null ? new Date().toISOString().slice(0, 19).replace("T", " ") : null;
   const insert = env.DB.prepare(`INSERT INTO attachments
-      (public_id, post_id, object_key, original_name, content_type, size, sha256)
-      SELECT ?, ?, ?, ?, ?, ?, ?
+      (public_id, post_id, object_key, original_name, content_type, size, sha256, unbound_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?
       WHERE (? IS NULL OR EXISTS (SELECT 1 FROM posts WHERE id = ?))
       RETURNING id, public_id AS publicId, post_id AS postId, object_key AS objectKey,
         original_name AS originalName, content_type AS contentType, size, sha256,
         created_at AS createdAt`).bind(
       publicId, postId, objectKey, checked.name, checked.contentType,
-      input.bytes.byteLength, sha256, postId, postId,
+      input.bytes.byteLength, sha256, unboundAt, postId, postId,
     );
   const statements = [insert];
   if (input.audit) {
@@ -287,8 +289,29 @@ export async function resolveCleanupQueueItem(objectKey: string) {
   }).from(attachmentCleanupQueue).where(eq(attachmentCleanupQueue.objectKey, objectKey)).limit(1);
   if (!rows[0]) throw new AttachmentError("待回收对象不存在", 404);
   if (rows[0].status === "resolved") throw new AttachmentError("该对象已标记为回收完成", 409);
+  if (rows[0].operation === "expired_unbound") {
+    const attachment = await env.DB.prepare("SELECT post_id FROM attachments WHERE object_key = ?")
+      .bind(objectKey).first<{ post_id: number | null }>();
+    if (attachment?.post_id != null) throw new AttachmentError("附件已绑定文章，不能按过期未绑定附件回收", 409);
+  }
   const head = await env.MEDIA.head(objectKey);
   if (head) throw new AttachmentError("对象仍存在于 R2，请先按精确键删除对象再确认回收", 409);
+  if (rows[0].operation === "expired_unbound") {
+    const results = await env.DB.batch([
+      env.DB.prepare(`DELETE FROM attachments WHERE object_key = ? AND post_id IS NULL
+        AND EXISTS (SELECT 1 FROM attachment_cleanup_queue
+          WHERE object_key = ? AND operation = 'expired_unbound' AND status = 'pending')`)
+        .bind(objectKey, objectKey),
+      env.DB.prepare(`UPDATE attachment_cleanup_queue SET status = 'resolved', updated_at = CURRENT_TIMESTAMP
+        WHERE object_key = ? AND operation = 'expired_unbound' AND status = 'pending'
+          AND NOT EXISTS (SELECT 1 FROM attachments WHERE object_key = ?)`)
+        .bind(objectKey, objectKey),
+    ]);
+    if (results[1]?.meta.changes !== 1) {
+      throw new AttachmentError("附件归属已变化，请重新检查后再确认回收", 409);
+    }
+    return { objectKey, operation: rows[0].operation, resolved: true };
+  }
   await getDb().update(attachmentCleanupQueue)
     .set({ status: "resolved", updatedAt: new Date().toISOString() })
     .where(eq(attachmentCleanupQueue.objectKey, objectKey));

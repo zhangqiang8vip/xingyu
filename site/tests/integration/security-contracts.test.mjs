@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { summarizeCspReport } from "../../domain/security/csp.ts";
 import {
   callMcpTool,
   closeTestHarness,
@@ -303,6 +304,140 @@ test("published public posts are readable while published space posts stay priva
       !privateHtml.includes(TEST_TITLES.privateBoundary),
       "the public response must not leak the private article title",
     );
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("public HTML carries the report-only CSP while APIs and reports stay clear", async () => {
+  const harness = await openTestHarness({ vars: { CSP_MODE: "report-only" } });
+  try {
+    const home = await harness.dispatch("/", { headers: { accept: "text/html" } });
+    const policy = home.headers.get("content-security-policy-report-only");
+    assert.ok(policy, "report-only mode must attach the CSP header to public HTML");
+    assert.match(policy, /default-src 'self'/);
+    assert.match(policy, /report-uri \/\.well-known\/csp-report/);
+    assert.equal(home.headers.get("content-security-policy"), null, "report-only must not enforce");
+
+    const about = await harness.dispatch("/about", { headers: { accept: "text/html" } });
+    assert.ok(about.headers.get("content-security-policy-report-only"),
+      "every public document page must carry the same policy");
+
+    const api = await harness.dispatch("/api/posts?scope=all");
+    assert.equal(api.headers.get("content-security-policy-report-only"), null,
+      "JSON APIs must not carry a document CSP");
+
+    const report = await harness.dispatch("/.well-known/csp-report", {
+      method: "POST",
+      headers: { "content-type": "application/csp-report" },
+      body: JSON.stringify({ "csp-report": { "document-uri": "http://127.0.0.1/", "violated-directive": "script-src" } }),
+    });
+    assert.equal(report.status, 204, "the violation endpoint accepts reports without echoing them");
+    assert.equal(report.headers.get("cache-control"), "no-store");
+
+    const oversized = await harness.dispatch("/.well-known/csp-report", {
+      method: "POST",
+      headers: { "content-type": "application/csp-report" },
+      body: "x".repeat(9000),
+    });
+    assert.equal(oversized.status, 204);
+    assert.equal(oversized.headers.get("cache-control"), "no-store");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("CSP report summary omits document paths, queries, and untrusted fields", () => {
+  const summary = summarizeCspReport({ "csp-report": {
+    "document-uri": "https://example.com/private?token=private-token",
+    "effective-directive": "script-src-elem",
+    "blocked-uri": "https://cdn.example.com/path?key=private-key",
+    "source-file": "https://example.com/private?secret=private-secret",
+    "status-code": 200,
+  } });
+  assert.deepEqual(summary, { directive: "script-src-elem", blockedOrigin: "https://cdn.example.com", statusCode: 200 });
+  assert.equal(summarizeCspReport({ "csp-report": { "effective-directive": "bogus;private-data" } }), null);
+});
+
+test("CSP enforcement switches the header and the default stays off", async () => {
+  const enforced = await openTestHarness({ vars: { CSP_MODE: "enforce" } });
+  try {
+    const home = await enforced.dispatch("/", { headers: { accept: "text/html" } });
+    assert.ok(home.headers.get("content-security-policy"), "enforce mode must emit the enforced header");
+    assert.equal(home.headers.get("content-security-policy-report-only"), null);
+  } finally {
+    await closeTestHarness(enforced);
+  }
+  const off = await openTestHarness({ vars: { CSP_MODE: "off" } });
+  try {
+    const home = await off.dispatch("/", { headers: { accept: "text/html" } });
+    assert.equal(home.headers.get("content-security-policy"), null);
+    assert.equal(home.headers.get("content-security-policy-report-only"), null,
+      "CSP stays opt-in until a mode is configured");
+  } finally {
+    await closeTestHarness(off);
+  }
+});
+
+test("admin diagnostics is admin-only and reports a healthy site with the full audit", async () => {
+  const harness = await openTestHarness();
+  try {
+    const anonymous = await jsonRequest(harness, "/api/admin/diagnostics");
+    assert.equal(
+      anonymous.status,
+      401,
+      `anonymous GET /api/admin/diagnostics must be rejected, got ${anonymous.status}`,
+    );
+
+    const cookie = await loginAdmin(harness);
+    const authorized = await jsonRequest(harness, "/api/admin/diagnostics", { cookie });
+    assert.equal(authorized.status, 200, `authenticated diagnostics must succeed, got ${authorized.status}`);
+    assert.equal(authorized.headers.get("cache-control"), "no-store", "diagnostics must never be cached");
+
+    const body = JSON.parse(await authorized.text());
+    assert.equal(body.schema.code, "18", "the report must name the expected schema version");
+    assert.equal(body.schema.database, "18", "the local D1 must report the same schema version");
+    assert.equal(body.schema.environment, "development");
+    assert.equal(body.migrations, null, "a legacy-bootstrap harness has no d1_migrations table");
+    assert.equal(body.ownerPresent, true, "the site owner membership must be present");
+    assert.equal(body.queue.pendingCleanup, 0);
+
+    const auditKeys = Object.keys(body.audit).sort();
+    assert.equal(auditKeys.length, 16, `diagnostics must report all 16 audit counters, got ${auditKeys.length}`);
+    for (const key of auditKeys) {
+      assert.equal(body.audit[key], 0, `audit counter ${key} must start at zero`);
+    }
+    assert.equal(typeof body.counts.posts, "number");
+    assert.equal(typeof body.generatedAt, "string");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("diagnostics surfaces orphaned core relations and recovers after cleanup", async () => {
+  const harness = await openTestHarness();
+  try {
+    await harness.db
+      .prepare("INSERT OR IGNORE INTO post_views (post_id, visitor_hash, viewed_on) VALUES (999999, 'orphan-probe', '2026-01-01')")
+      .run();
+
+    const cookie = await loginAdmin(harness);
+    const dirty = await jsonRequest(harness, "/api/admin/diagnostics", { cookie });
+    assert.equal(dirty.status, 200);
+    const dirtyBody = JSON.parse(await dirty.text());
+    assert.equal(
+      dirtyBody.audit.views_missing_post,
+      1,
+      `an orphaned post_views row must surface as views_missing_post=1, got ${dirtyBody.audit.views_missing_post}`,
+    );
+
+    await harness.db
+      .prepare("DELETE FROM post_views WHERE post_id = 999999 AND visitor_hash = 'orphan-probe'")
+      .run();
+
+    const clean = await jsonRequest(harness, "/api/admin/diagnostics", { cookie });
+    const cleanBody = JSON.parse(await clean.text());
+    assert.equal(cleanBody.audit.views_missing_post, 0, "the audit must recover to zero after the orphan is removed");
   } finally {
     await closeTestHarness(harness);
   }

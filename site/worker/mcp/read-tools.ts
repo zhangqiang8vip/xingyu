@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { getDb } from "../../db";
-import { ensureDatabase } from "../../db/bootstrap";
-import { getContentPage, listAdminPosts } from "../../db/queries";
-import { categories } from "../../db/schema";
-import { getSpaceOverview, getSpacePath, listSpaceChildren, listSpacePosts, resolveSpace, searchSpaces } from "../../db/spaces";
+import { getDb } from "@/db";
+import { ensureDatabase } from "@/db/bootstrap";
+import { getContentPage, listAdminPosts } from "@/db/queries";
+import { categories } from "@/db/schema";
+import { getSpaceOverview, getSpacePath, listSpaceChildren, listSpacePosts, resolveSpace, searchSpaces } from "@/db/spaces";
 import {
   AttachmentError,
   MAX_MCP_ATTACHMENT_BYTES,
@@ -13,8 +13,8 @@ import {
   getAttachment,
   getAttachmentObject,
   listPostAttachments,
-} from "../../db/attachments";
-import { PostWriteError } from "../../db/post-write";
+} from "@/db/attachments";
+import { PostWriteError } from "@/db/post-write";
 import { requireScope } from "../mcp-auth";
 import { extractMarkdownOutline, postReadHint, searchPostCard, type PostView } from "./post-read";
 import {

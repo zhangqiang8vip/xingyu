@@ -138,6 +138,8 @@ const equivalentNamedUniqueIndexes = new Set([
   "oauth_authorization_codes_hash_uidx",
   "oauth_clients_client_id_uidx",
   "oauth_refresh_tokens_hash_uidx",
+  "site_memberships_user_id_uidx",
+  "user_identities_provider_subject_uidx",
 ]);
 
 async function uniqueIndexSignatures(db, table) {
@@ -395,11 +397,11 @@ test("a newer database schema is never downgraded by an older worker", async () 
     const worker = server.getWorker();
     const { DB } = await worker.getEnv();
     await DB.prepare("CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)").run();
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '16'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '19'), ('app_environment', 'development')").run();
     const response = await worker.fetch("/");
     assert.equal(response.status, 500, "an older worker must refuse a newer schema");
     const version = await DB.prepare("SELECT value FROM app_meta WHERE key='schema_version'").first();
-    assert.equal(version?.value, "16", "the version marker must remain unchanged");
+    assert.equal(version?.value, "19", "the version marker must remain unchanged");
     const postsTable = await DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='posts'").first();
     assert.equal(postsTable, null, "the rejected request must not create application tables");
   } finally {
@@ -453,7 +455,7 @@ test("legacy initialization refuses historical Slug collisions before upgrading"
   }
 });
 
-test("legacy schema 13 upgrades to 14 while preserving posts and historical links", async () => {
+test("legacy schema 13 upgrades to the current schema while preserving posts and historical links", async () => {
   const server = createTestHarness({
     root: SITE_ROOT,
     workers: [{ configPath: "./wrangler.production.jsonc", vars: { APP_ENV: "development", DB_SCHEMA_MODE: "legacy-bootstrap" } }],
@@ -464,7 +466,9 @@ test("legacy schema 13 upgrades to 14 while preserving posts and historical link
     const { DB } = await worker.getEnv();
     const publicId = `01${"K".repeat(24)}`;
     await applyVersionedMigrations(DB, "0012_reserve-historical-slugs.sql");
-    await applySqlFile(DB, "seed-app-defaults.sql");
+    // Mirror the pre-upgrade site without touching schema-17 seeds: the legacy
+    // request path seeds users, identities and memberships itself.
+    await DB.prepare("INSERT INTO categories (id, name, slug) VALUES (1, 'Legacy default', 'notes')").run();
     await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '13'), ('app_environment', 'development')").run();
     await DB.prepare(`INSERT INTO posts (public_id, title, slug, category_id, content, status, published_at)
       VALUES (?, 'Preserved article', 'upgrade-current', 1, '# Preserved body', 'published', '2025-01-01')`)
@@ -481,7 +485,7 @@ test("legacy schema 13 upgrades to 14 while preserving posts and historical link
     const response = await worker.fetch("/");
     assert.equal(response.status, 200, "valid legacy data must upgrade and serve normally");
     const marker = await DB.prepare("SELECT value FROM app_meta WHERE key = 'schema_version'").first();
-    assert.equal(marker?.value, "15");
+    assert.equal(marker?.value, "18");
     const postAfter = await DB.prepare("SELECT id, public_id, slug, content, status, version FROM posts WHERE public_id = ?")
       .bind(publicId).first();
     assert.deepEqual(postAfter, postBefore, "upgrading must not rewrite the article");
@@ -547,10 +551,13 @@ test("migration-only startup waits for an interrupted local migration and recove
 
     await applySqlFile(DB, "0012_reserve-historical-slugs.sql");
     await applySqlFile(DB, "0013_bitter_caretaker.sql");
+    await applySqlFile(DB, "0014_hot_the_stranger.sql");
+    await applySqlFile(DB, "0015_amused_donald_blake.sql");
+    await applySqlFile(DB, "0016_bouncy_luckman.sql");
     await applySqlFile(DB, "seed-app-defaults.sql");
     const retainedCategory = await DB.prepare("SELECT name FROM categories WHERE id = 1").first();
     assert.equal(retainedCategory?.name, "Retained category", "retrying the seed must not overwrite existing data");
-    await DB.prepare("UPDATE app_meta SET value = '15' WHERE key = 'schema_version'").run();
+    await DB.prepare("UPDATE app_meta SET value = '18' WHERE key = 'schema_version'").run();
     const schemaBeforeRecovery = await DB.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
     assert.equal((await worker.fetch("/")).status, 200, "the same worker must recover once migration is complete");
     const schemaAfterRecovery = await DB.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
@@ -573,7 +580,7 @@ test("migration-only startup rejects a version-marked database with a missing se
     const { DB } = await worker.getEnv();
     await applyVersionedMigrations(DB);
     await applySqlFile(DB, "seed-app-defaults.sql");
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
     await DB.prepare("DROP TABLE attachments").run();
     const response = await worker.fetch("/");
     assert.equal(response.status, 500, "a version marker alone cannot validate the complete schema");
@@ -595,7 +602,7 @@ test("migration-only startup rejects a marked database without the post version 
     const { DB } = await worker.getEnv();
     await applyVersionedMigrations(DB);
     await applySqlFile(DB, "seed-app-defaults.sql");
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
     await DB.prepare("ALTER TABLE posts RENAME COLUMN version TO obsolete_version").run();
     assert.equal((await worker.fetch("/connect")).status, 500,
       "a public page must not pass startup when article edits cannot use optimistic versions");
@@ -618,7 +625,7 @@ test("migration-only startup rejects an ordinary table in place of FTS5", async 
     const { DB } = await worker.getEnv();
     await applyVersionedMigrations(DB);
     await applySqlFile(DB, "seed-app-defaults.sql");
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
     await DB.prepare("DROP TABLE posts_fts").run();
     await DB.prepare("CREATE TABLE posts_fts (rowid INTEGER PRIMARY KEY, title TEXT, excerpt TEXT, content TEXT)").run();
     assert.equal((await worker.fetch("/")).status, 500,
@@ -646,7 +653,7 @@ test("migration-only startup rejects a marked database without the public ID gua
       const { DB } = await worker.getEnv();
       await applyVersionedMigrations(DB);
       await applySqlFile(DB, "seed-app-defaults.sql");
-      await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+      await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
       await DB.prepare(`DROP TRIGGER ${guardName}`).run();
       assert.equal((await worker.fetch("/")).status, 500,
         `a migration marker must not accept a database without ${guardName}`);
@@ -669,7 +676,7 @@ test("migration-only startup rejects a named index with missing or misplaced uni
     const { DB } = await worker.getEnv();
     await applyVersionedMigrations(DB);
     await applySqlFile(DB, "seed-app-defaults.sql");
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
     await DB.prepare("DROP INDEX categories_slug_uidx").run();
     await DB.prepare("CREATE INDEX categories_slug_uidx ON categories (slug)").run();
     const response = await worker.fetch("/");
@@ -710,7 +717,7 @@ test("migration-only startup rejects a marked database without required seed dat
     const worker = server.getWorker();
     const { DB } = await worker.getEnv();
     await applyVersionedMigrations(DB);
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
     const response = await worker.fetch("/");
     assert.equal(response.status, 500, "version markers must not hide a skipped seed step");
     const settings = await DB.prepare("SELECT id FROM site_settings WHERE id = 1").first();
@@ -762,7 +769,7 @@ test("a locally migrated and seeded database serves public and admin pages witho
     await applySqlFile(DB, "seed-app-defaults.sql");
     const retainedTitle = await DB.prepare("SELECT title FROM content_pages WHERE slug = 'about'").first();
     assert.equal(retainedTitle?.title, "Locally customized about page", "reapplying defaults must preserve edited content");
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
 
     const settings = await DB.prepare("SELECT id FROM site_settings WHERE id = 1").first();
     assert.equal(settings?.id, 1);
@@ -950,7 +957,7 @@ test("a locally migrated and seeded database serves public and admin pages witho
       "deleting the detached attachment must remove its local R2 object");
 
     const marker = await DB.prepare("SELECT value FROM app_meta WHERE key = 'schema_version'").first();
-    assert.equal(marker?.value, "15");
+    assert.equal(marker?.value, "18");
     const schemaAfterRequests = await DB.prepare(
       "SELECT type, name, tbl_name, rootpage, sql FROM sqlite_master ORDER BY type, name",
     ).all();
@@ -1045,13 +1052,29 @@ test("representative legacy rows retain links and visibility in a local migratio
     await applySqlFile(DB, "seed-chatgpt-oauth.sql");
     for (const table of businessTables) {
       const destination = (await DB.prepare(`SELECT * FROM ${table}`).all()).results ?? [];
-      const sortRows = (rows) => rows.map((row) => JSON.stringify(
-        Object.fromEntries(Object.entries(row).sort(([left], [right]) => left.localeCompare(right))),
-      )).sort();
+      const strip = (row) => {
+        const entries = Object.entries(row).sort(([left], [right]) => left.localeCompare(right));
+        if (table !== "posts") return JSON.stringify(Object.fromEntries(entries));
+        // Attribution columns are repaired by the idempotent seeds after import;
+        // compare everything else row-for-row.
+        return JSON.stringify(Object.fromEntries(entries.filter(([key]) =>
+          !["author_id", "created_by", "updated_by"].includes(key))));
+      };
+      const sortRows = (rows) => rows.map(strip).sort();
       assert.deepEqual(sortRows(destination), sortRows(sourceRows.get(table)),
         `${table} rows must survive import and later idempotent seeds unchanged`);
     }
-    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '15'), ('app_environment', 'development')").run();
+    const attributed = await DB.prepare(`SELECT COUNT(*) AS count FROM posts
+      WHERE author_id = 1 AND created_by = 1 AND updated_by = 1`).first();
+    assert.equal(attributed?.count, 2,
+      "imported legacy articles must be attributed to the site owner by the idempotent seeds");
+    const owner = await DB.prepare(`SELECT u.id, i.provider, i.subject, m.role FROM users u
+      JOIN user_identities i ON i.user_id = u.id
+      JOIN site_memberships m ON m.user_id = u.id
+      WHERE m.role = 'owner'`).first();
+    assert.deepEqual(owner, { id: 1, provider: "local", subject: "owner", role: "owner" },
+      "the migration-built site must carry its local owner identity and membership");
+    await DB.prepare("INSERT INTO app_meta (key, value) VALUES ('schema_version', '18'), ('app_environment', 'development')").run();
 
     const copied = await DB.prepare(`SELECT p.public_id, p.space_id, p.version, c.slug AS category_slug
       FROM posts p JOIN categories c ON c.id = p.category_id WHERE p.id IN (201, 202) ORDER BY p.id`).all();
@@ -1078,7 +1101,7 @@ test("representative legacy rows retain links and visibility in a local migratio
     const auditSql = readFileSync(new URL("../../drizzle/verify-core-relations.sql", import.meta.url), "utf8");
     const cleanAudit = await DB.prepare(auditSql).all();
     assert.equal(cleanAudit.results?.length, 1);
-    assert.equal(Object.keys(cleanAudit.results[0]).length, 13);
+    assert.equal(Object.keys(cleanAudit.results[0]).length, 16);
     assert.ok(Object.values(cleanAudit.results[0]).every((count) => count === 0),
       `valid migrated links must pass the cutover audit: ${JSON.stringify(cleanAudit.results)}`);
     await DB.prepare("UPDATE attachments SET post_id = 9999 WHERE id = 401").run();
@@ -1102,6 +1125,17 @@ test("representative legacy rows retain links and visibility in a local migratio
     assert.equal(orphanToken?.access_tokens_missing_oauth_client, 1,
       "the audit must detect OAuth credentials whose client was not imported");
     await DB.prepare("UPDATE oauth_access_tokens SET client_id = 'local-legacy-client' WHERE id = 31").run();
+    await DB.prepare("UPDATE posts SET author_id = NULL WHERE id = 201").run();
+    const missingAuthor = await DB.prepare(auditSql).first();
+    assert.equal(missingAuthor?.posts_missing_author, 1,
+      "the audit must detect an article whose attribution was lost");
+    await DB.prepare("UPDATE posts SET author_id = 1, created_by = 1, updated_by = 1 WHERE id = 201").run();
+    await DB.prepare(`INSERT INTO user_identities (user_id, provider, subject)
+      VALUES (9999, 'synthetic', 'orphan-identity')`).run();
+    const orphanIdentity = await DB.prepare(auditSql).first();
+    assert.equal(orphanIdentity?.identities_missing_user, 1,
+      "the audit must detect an identity pointing at a missing user");
+    await DB.prepare("DELETE FROM user_identities WHERE user_id = 9999").run();
     await assert.rejects(DB.prepare(
       "INSERT INTO post_slug_history (post_id, slug) VALUES (202, 'legacy-public-article')",
     ).run(), "the migrated schema must refuse a historical URL that shadows another article's current slug");

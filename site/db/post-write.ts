@@ -8,6 +8,7 @@ import { categories, postSlugHistory, posts, spaces } from "./schema";
 import type { PostPayload } from "@/domain/posts/post-input";
 import { attachmentIdsFromMarkdown, prepareMarkdownAttachmentBinding } from "./attachments";
 import { preparePostWriteActivity, type PostWriteAudit } from "./mcp-activity";
+import { getSiteOwnerUserId } from "./site-identity";
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_SLUG_LENGTH = 180;
@@ -83,15 +84,18 @@ export async function createPostRecord(input: PostPayload, audit?: PostWriteAudi
   const publishedAt = input.status === "published"
     ? input.publishedAt ?? new Date().toISOString()
     : null;
+  // Attribution is server-resolved: the payload never decides who the author is.
+  const ownerId = await getSiteOwnerUserId();
   let activity: { id: number; createdAt: string } | undefined;
   try {
     const insert = env.DB.prepare(`INSERT INTO posts
-      (public_id, title, slug, excerpt, content, category_id, space_id, status, featured, published_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      (public_id, title, slug, excerpt, content, category_id, space_id, status, featured, published_at, author_id, created_by, updated_by)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)
         AND (? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id = ?)) ${eligibility.sql}`).bind(
       publicId, input.title, input.slug, input.excerpt, input.content,
       input.categoryId, input.spaceId, input.status, input.featured ? 1 : 0, publishedAt,
+      ownerId, ownerId, ownerId,
       input.categoryId, input.spaceId, input.spaceId,
       ...eligibility.bindings,
     );
@@ -170,7 +174,7 @@ export async function updatePostRecord(id: number, input: PostPayload, expectedV
     if (historical[0] && historical[0].postId !== id) {
       throw new PostWriteError("该 Slug 属于另一篇文章的历史地址", 409);
     }
-
+    const ownerId = await getSiteOwnerUserId();
     const publishedAt = input.status === "published"
       ? input.publishedAt ?? current[0].publishedAt ?? new Date().toISOString()
       : current[0].publishedAt;
@@ -182,13 +186,13 @@ export async function updatePostRecord(id: number, input: PostPayload, expectedV
         input.spaceId, input.spaceId, ...eligibility.bindings);
     const update = env.DB.prepare(`UPDATE posts SET
       title = ?, slug = ?, excerpt = ?, content = ?, category_id = ?, space_id = ?,
-      status = ?, featured = ?, published_at = ?, updated_at = ?, version = version + 1
+      status = ?, featured = ?, published_at = ?, updated_at = ?, updated_by = ?, version = version + 1
       WHERE id = ? AND version = ?
       AND EXISTS (SELECT 1 FROM categories WHERE id = ?)
       AND (? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id = ?)) ${eligibility.sql}`).bind(
       input.title, input.slug, input.excerpt, input.content, input.categoryId,
       input.spaceId, input.status, input.featured ? 1 : 0, publishedAt,
-      new Date().toISOString(), id, expectedVersion, input.categoryId,
+      new Date().toISOString(), ownerId, id, expectedVersion, input.categoryId,
       input.spaceId, input.spaceId, ...eligibility.bindings,
     );
     // SQLite changes() excludes trigger side effects. D1 meta.changes does not.
@@ -233,4 +237,39 @@ export async function updatePostRecord(id: number, input: PostPayload, expectedV
   if (!post) throw new PostWriteError("文章不存在", 404);
   if (audit && !activity) throw new Error("MCP article audit receipt is missing after update");
   return { ...post, activity };
+}
+
+export async function deleteAdminPost(postId: number, expectedVersion: number) {
+  if (!Number.isSafeInteger(postId) || postId < 1) throw new PostWriteError("文章不存在", 404);
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+    throw new PostWriteError("缺少有效的文章版本，请刷新列表后再删除", 409);
+  }
+  await ensureDatabase();
+  const current = await getDb().select({ version: posts.version }).from(posts)
+    .where(eq(posts.id, postId)).limit(1);
+  if (!current[0]) throw new PostWriteError("文章不存在", 404);
+  if (current[0].version !== expectedVersion) {
+    throw new PostWriteError("文章已被其他编辑者更新，请刷新列表后再删除", 409);
+  }
+
+  // All dependent writes use the same version guard; a concurrent edit before
+  // this transaction turns the entire sequence into no-ops.
+  const currentPost = "EXISTS (SELECT 1 FROM posts WHERE id = ? AND version = ?)";
+  const guarded = (table: string) => env.DB.prepare(
+    `DELETE FROM ${table} WHERE post_id = ? AND ${currentPost}`,
+  ).bind(postId, postId, expectedVersion);
+  const statements = [
+    guarded("post_slug_history"),
+    guarded("post_views"),
+    guarded("post_preview_tokens"),
+    env.DB.prepare(`UPDATE attachments SET post_id = NULL, unbound_at = CURRENT_TIMESTAMP
+      WHERE post_id = ? AND ${currentPost}`).bind(postId, postId, expectedVersion),
+    env.DB.prepare("DELETE FROM posts WHERE id = ? AND version = ?").bind(postId, expectedVersion),
+    env.DB.prepare("SELECT changes() AS changed"),
+  ];
+  const result = await env.DB.batch(statements);
+  const deleted = result[5]?.results?.[0] as { changed?: number } | undefined;
+  if (Number(deleted?.changed ?? 0) !== 1) {
+    throw new PostWriteError("文章已被其他编辑者更新，请刷新列表后再删除", 409);
+  }
 }

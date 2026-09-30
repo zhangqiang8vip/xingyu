@@ -1,7 +1,8 @@
-import { getWritablePost, PostWriteError, updatePostRecord } from "../../../../db/post-write";
-import { isAdminRequest, unauthorized } from "../../admin-auth";
+import { getWritablePost, PostWriteError, updatePostRecord } from "@/db/post-write";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
 import { parsePostPayload } from "@/domain/posts/post-input";
-import { deleteAdminPost, getAdminPost } from "@/server/services/admin-posts";
+import { getAdminPost } from "@/db/queries";
+import { deleteAdminPost } from "@/db/post-write";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isAdminRequest(request))) return unauthorized();

@@ -18,7 +18,7 @@ import AdminArticleEditor from "./AdminArticleEditor";
 import AdminPreviewShareDialog from "./AdminPreviewShareDialog";
 import type { AdminCategory, AdminMcpConnection, AdminPost, AdminSection, AdminStats, ArticleForm } from "./admin-types";
 import { readApiJson } from "@/app/api-response";
-import ModalPostLink from "@/features/reader/ModalPostLink";
+import ModalPostLink from "../reader/ModalPostLink";
 import type { AdminReaderContext, AdminReaderReturnTarget } from "@/domain/reader/admin-reader-context";
 import { adminLocationHref, parseAdminLocation, type AdminLocation } from "@/domain/admin/location";
 

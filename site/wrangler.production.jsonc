@@ -5,9 +5,13 @@
   "compatibility_date": "2026-07-23",
   "compatibility_flags": ["nodejs_compat"],
   "no_bundle": true,
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
   "vars": {
     "APP_ENV": "production",
-    "DB_SCHEMA_MODE": "migration-only"
+    "DB_SCHEMA_MODE": "migration-only",
+    "CSP_MODE": "report-only"
   },
   "d1_databases": [
     {

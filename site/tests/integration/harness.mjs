@@ -107,10 +107,10 @@ export const TEST_TITLES = {
  * initialization promise in module scope, so reusing a server across tests and
  * resetting storage underneath it can leave that cache stale.
  */
-export async function openTestHarness({ r2DeleteFault = false } = {}) {
+export async function openTestHarness({ r2DeleteFault = false, vars = {} } = {}) {
   const appWorker = {
     configPath: "./wrangler.production.jsonc",
-    vars: { APP_ENV: "development", DB_SCHEMA_MODE: "legacy-bootstrap" },
+    vars: { APP_ENV: "development", DB_SCHEMA_MODE: "legacy-bootstrap", ...vars },
     secrets: {
       ADMIN_PASSWORD: TEST_ADMIN_PASSWORD,
       ADMIN_SESSION_SECRET: TEST_ADMIN_SESSION_SECRET,

@@ -1,6 +1,6 @@
-import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listAttachmentOrphanCandidates, listPostAttachments, listCleanupQueueItems, resolveCleanupQueueItem } from "../../../db/attachments";
-import { isAdminRequest, unauthorized } from "../admin-auth";
-import { AttachmentCleanupRequiredError } from "../../../db/attachment-cleanup";
+import { createAttachment, AttachmentError, attachmentMarkdown, attachmentUrl, listAttachmentOrphanCandidates, listPostAttachments, listCleanupQueueItems, resolveCleanupQueueItem } from "@/db/attachments";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
+import { AttachmentCleanupRequiredError } from "@/db/attachment-cleanup";
 
 export async function GET(request: Request) {
   if (!(await isAdminRequest(request))) return unauthorized();

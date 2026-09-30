@@ -4,7 +4,7 @@ import "vditor/dist/index.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Vditor from "vditor";
 import { removeAttachmentReference } from "@/domain/attachments/markdown-reference";
-import { mermaidAppearance } from "@/features/markdown/mermaid-theme";
+import { mermaidAppearance } from "../markdown/mermaid-theme";
 
 const slashHints = [
   { html: "<b>H1</b><span>一级标题</span>", value: "# 一级标题" },

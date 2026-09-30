@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { ensureDatabase } from "@/db/bootstrap";
-import { contentPages, siteSettings } from "@/db/schema";
+import { getDb } from ".";
+import { ensureDatabase } from "./bootstrap";
+import { contentPages, siteSettings } from "./schema";
 import { CONTENT_LIMITS } from "@/domain/site/config";
 
 export class SiteContentError extends Error {

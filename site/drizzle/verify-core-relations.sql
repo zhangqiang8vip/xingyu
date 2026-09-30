@@ -32,4 +32,9 @@ SELECT
   (SELECT COUNT(*) FROM oauth_refresh_tokens token LEFT JOIN oauth_clients client
    ON client.client_id = token.client_id WHERE client.client_id IS NULL) AS refresh_tokens_missing_oauth_client,
   (SELECT COUNT(*) FROM oauth_consents consent LEFT JOIN oauth_clients client
-   ON client.client_id = consent.client_id WHERE client.client_id IS NULL) AS consents_missing_oauth_client;
+   ON client.client_id = consent.client_id WHERE client.client_id IS NULL) AS consents_missing_oauth_client,
+  (SELECT COUNT(*) FROM posts WHERE author_id IS NULL) AS posts_missing_author,
+  (SELECT COUNT(*) FROM user_identities identity LEFT JOIN users u ON u.id = identity.user_id
+   WHERE u.id IS NULL) AS identities_missing_user,
+  (SELECT COUNT(*) FROM site_memberships m LEFT JOIN users u ON u.id = m.user_id
+   WHERE u.id IS NULL) AS memberships_missing_user;
