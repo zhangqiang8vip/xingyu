@@ -55,7 +55,11 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
     title: "浏览知识空间",
     description: "读取顶级空间或指定空间的直属子空间。空间层级不固定，可逐层浏览。",
     inputSchema: { parent: SPACE_SCHEMA.optional(), query: z.string().trim().max(100).optional() },
-    outputSchema: { spaces: z.array(z.record(z.string(), z.unknown())).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
+    outputSchema: {
+      parent: z.object({ id: z.number(), name: z.string() }).nullable().optional(),
+      spaces: z.array(z.record(z.string(), z.unknown())).optional(),
+      ...MCP_ERROR_OUTPUT_FIELDS,
+    },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ parent, query }) => {
     try {
@@ -100,6 +104,8 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
       page_size: z.number().int().min(1).max(50).optional().default(12),
     },
     outputSchema: {
+      detail: z.enum(["minimal", "summary"]).optional(),
+      hint: z.string().optional(),
       posts: z.array(z.record(z.string(), z.unknown())).optional(),
       next_cursor: z.string().nullable().optional(),
       ...MCP_ERROR_OUTPUT_FIELDS,
@@ -132,7 +138,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
       view: z.enum(["meta", "excerpt", "outline", "content"]).optional().default("outline")
         .describe("meta 仅元数据；excerpt 加摘要；outline 加标题大纲；content 才返回完整 Markdown"),
     },
-    outputSchema: { post: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
+    outputSchema: { hint: z.string().optional(), post: z.record(z.string(), z.unknown()).optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ identifier, view }) => {
     try {

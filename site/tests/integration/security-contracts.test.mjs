@@ -186,6 +186,43 @@ test("MCP rejects invalid bearer tokens and read-only tokens cannot call write t
   }
 });
 
+test("MCP read results pass output schema validation in the official client", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const created = await jsonRequest(harness, "/api/posts", {
+      method: "POST",
+      cookie,
+      body: draftPayload(),
+    });
+    assert.equal(created.status, 201);
+    const { post } = await created.json();
+    await seedReadOnlyOAuthToken({ db: harness.db, origin: harness.origin, token: READ_ONLY_TOKEN });
+
+    await withMcpClient(harness, READ_ONLY_TOKEN, async (client) => {
+      const spaces = await client.callTool({ name: "list_spaces", arguments: {} });
+      assert.equal(spaces.structuredContent?.ok, true);
+      assert.equal(spaces.structuredContent?.parent, null);
+
+      const search = await client.callTool({ name: "search_posts", arguments: {} });
+      assert.equal(search.structuredContent?.ok, true);
+      assert.equal(search.structuredContent?.detail, "minimal");
+      assert.equal(typeof search.structuredContent?.hint, "string");
+      assert.ok(search.structuredContent?.posts?.some((item) => item.public_id === post.publicId));
+
+      const outline = await client.callTool({
+        name: "get_post",
+        arguments: { identifier: post.publicId, view: "outline" },
+      });
+      assert.equal(outline.structuredContent?.ok, true);
+      assert.equal(outline.structuredContent?.post?.public_id, post.publicId);
+      assert.equal(typeof outline.structuredContent?.hint, "string");
+    });
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
 test("anonymous admin page requests redirect to the admin login page", async () => {
   const harness = await openTestHarness();
   try {
