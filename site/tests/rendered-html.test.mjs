@@ -419,7 +419,8 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(articleEditor,/私有知识文章 · 仅管理员与 MCP 可检索/);
   assert.match(admin,/确认移出知识空间吗/);
   assert.match(spacePanel,/顶级空间彼此独立/);
-  assert.match(spacePanel,/只展示当前层级/);
+  assert.match(spacePanel,/useState<"current"\|"descendants"\|"all">\("descendants"\)/);
+  assert.match(spacePanel,/space-article-group/);
   assert.match(spacePanel,/仅当前空间/);
   assert.match(spacePanel,/包含子空间/);
   assert.match(spacePanel,/继续加载/);
