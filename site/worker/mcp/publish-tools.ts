@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { env } from "cloudflare:workers";
-import { ensureDatabase } from "../../db/bootstrap";
-import { getContentPage } from "../../db/queries";
-import { PostWriteError, updatePostRecord } from "../../db/post-write";
+import { ensureDatabase } from "@/db/bootstrap";
+import { getContentPage } from "@/db/queries";
+import { PostWriteError, updatePostRecord } from "@/db/post-write";
 import { requireScope } from "../mcp-auth";
 import {
   CHANGE_SUMMARY_SCHEMA,

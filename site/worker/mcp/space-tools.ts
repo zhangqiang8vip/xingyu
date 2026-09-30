@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createSpace, deleteSpace, getSpacePath, resolveSpace, updateSpace } from "../../db/spaces";
+import { createSpace, deleteSpace, getSpacePath, resolveSpace, updateSpace } from "@/db/spaces";
 import { requireScope } from "../mcp-auth";
 import {
   CHANGE_SUMMARY_SCHEMA,

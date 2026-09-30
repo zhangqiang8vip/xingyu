@@ -5,6 +5,9 @@ import { PUBLIC_CACHE_SCHEMA_STATEMENTS } from "./public-cache-schema";
 
 let ready: Promise<void> | null = null;
 
+/** 当前 worker 期望的 D1 schema 版本，供健康检查与迁移门禁共用。 */
+export const schemaVersion = "18";
+
 const requiredUniqueIndexes = {
   attachments_object_key_uidx: { table: "attachments", columns: ["object_key"] },
   attachments_public_id_uidx: { table: "attachments", columns: ["public_id"] },
@@ -20,8 +23,10 @@ const requiredUniqueIndexes = {
   post_slug_history_slug_uidx: { table: "post_slug_history", columns: ["slug"] },
   posts_public_id_uidx: { table: "posts", columns: ["public_id"] },
   posts_slug_uidx: { table: "posts", columns: ["slug"] },
+  site_memberships_user_id_uidx: { table: "site_memberships", columns: ["user_id"] },
   spaces_parent_slug_uidx: { table: "spaces", columns: ["parent_id", "slug"] },
   spaces_root_slug_uidx: { table: "spaces", columns: ["slug"] },
+  user_identities_provider_subject_uidx: { table: "user_identities", columns: ["provider", "subject"] },
 } as const;
 
 const requiredMigrationObjects = {
@@ -29,8 +34,7 @@ const requiredMigrationObjects = {
     "admin_login_attempts", "app_meta", "attachment_cleanup_queue", "attachments", "categories",
     "content_pages", "mcp_activity", "oauth_access_tokens", "oauth_authorization_codes", "oauth_clients",
     "oauth_consents", "oauth_rate_limits", "oauth_refresh_tokens", "post_preview_tokens",
-    "post_slug_history", "post_views", "posts", "posts_fts", "public_cache_state",
-    "site_settings", "spaces",
+    "post_slug_history", "post_views", "posts", "posts_fts", "public_cache_state", "site_memberships", "site_settings", "spaces", "user_identities", "users", "view_request_limits",
   ],
   index: Object.keys(requiredUniqueIndexes),
   trigger: [
@@ -58,7 +62,6 @@ async function initialize() {
   const d1 = env.DB;
   if (!d1) throw new Error("D1 binding DB is unavailable");
   const runtimeEnvironment = env.APP_ENV === "development" ? "development" : "production";
-  const schemaVersion = "15";
   const schemaMode = env.DB_SCHEMA_MODE ?? "legacy-bootstrap";
   const localPreviewBootstrap = schemaMode === "local-preview-bootstrap" && runtimeEnvironment === "production";
   if (schemaMode === "migration-only") {
@@ -141,11 +144,12 @@ async function initialize() {
       (SELECT COUNT(*) FROM site_settings WHERE id = 1) AS settings_count,
       (SELECT COUNT(*) FROM categories) AS category_count,
       (SELECT COUNT(*) FROM content_pages WHERE slug IN ('about', 'connect')) AS page_count,
-      (SELECT COUNT(*) FROM public_cache_state WHERE id = 1) AS cache_count`).first<{
-        settings_count: number; category_count: number; page_count: number; cache_count: number;
+      (SELECT COUNT(*) FROM public_cache_state WHERE id = 1) AS cache_count,
+      (SELECT COUNT(*) FROM site_memberships WHERE role = 'owner') AS owner_count`).first<{
+        settings_count: number; category_count: number; page_count: number; cache_count: number; owner_count: number;
       }>();
     if (!requiredData || requiredData.settings_count !== 1 || requiredData.category_count < 1
-      || requiredData.page_count !== 2 || requiredData.cache_count !== 1) {
+      || requiredData.page_count !== 2 || requiredData.cache_count !== 1 || requiredData.owner_count < 1) {
       throw new Error(`D1 required data is incomplete for version ${schemaVersion}`);
     }
     return;
@@ -176,7 +180,7 @@ async function initialize() {
       || Number(storedVersion) > Number(schemaVersion))) {
       throw new Error(`D1 schema version ${storedVersion} is newer than or incompatible with worker version ${schemaVersion}`);
     }
-    if (storedVersion && Number(storedVersion) < 15) {
+    if (storedVersion && Number(storedVersion) < 18) {
       const legacyObjects = await d1.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('posts', 'post_slug_history')")
         .all<{ name: string }>();
       if ((legacyObjects.results ?? []).length === 2) {
@@ -291,7 +295,8 @@ async function initialize() {
       content_type TEXT NOT NULL,
       size INTEGER NOT NULL,
       sha256 TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      unbound_at TEXT
     )`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS attachment_cleanup_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -339,6 +344,41 @@ async function initialize() {
     d1.prepare("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"),
     d1.prepare(`CREATE TABLE IF NOT EXISTS admin_login_attempts (
       identifier TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started INTEGER NOT NULL,
+      blocked_until INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      display_name TEXT NOT NULL DEFAULT '星屿管理员',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS user_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      email TEXT,
+      name TEXT,
+      avatar_url TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_login_at TEXT
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS site_memberships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'owner',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS user_identities_provider_subject_uidx ON user_identities(provider, subject)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS user_identities_user_idx ON user_identities(user_id)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS site_memberships_user_id_uidx ON site_memberships(user_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS site_memberships_role_idx ON site_memberships(role)"),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS view_request_limits (
+      identity_hash TEXT PRIMARY KEY,
       attempts INTEGER NOT NULL DEFAULT 0,
       window_started INTEGER NOT NULL,
       blocked_until INTEGER NOT NULL DEFAULT 0,
@@ -454,6 +494,20 @@ async function initialize() {
   if (!(postColumns.results ?? []).some((column) => column.name === "version")) {
     await d1.prepare("ALTER TABLE posts ADD COLUMN version INTEGER NOT NULL DEFAULT 1").run();
   }
+  const attachmentColumns = await d1.prepare("PRAGMA table_info(attachments)").all<{ name: string }>();
+  if (!(attachmentColumns.results ?? []).some((column) => column.name === "unbound_at")) {
+    await d1.prepare("ALTER TABLE attachments ADD COLUMN unbound_at TEXT").run();
+  }
+  await d1.prepare("UPDATE attachments SET unbound_at = created_at WHERE post_id IS NULL AND unbound_at IS NULL").run();
+  if (!(postColumns.results ?? []).some((column) => column.name === "author_id")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN author_id INTEGER").run();
+  }
+  if (!(postColumns.results ?? []).some((column) => column.name === "created_by")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN created_by INTEGER").run();
+  }
+  if (!(postColumns.results ?? []).some((column) => column.name === "updated_by")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN updated_by INTEGER").run();
+  }
   const postsWithoutPublicId = await d1.prepare("SELECT id FROM posts WHERE public_id IS NULL OR public_id = ''").all<{ id: number }>();
   if (postsWithoutPublicId.results?.length) {
     await d1.batch(postsWithoutPublicId.results.map((post) => d1.prepare("UPDATE posts SET public_id = ? WHERE id = ?").bind(createPostPublicId(), post.id)));
@@ -477,6 +531,9 @@ async function initialize() {
   const connect = DEFAULT_CONNECT_PAGE;
   await d1.batch([
     d1.prepare("INSERT OR IGNORE INTO categories (id, name, slug, color) VALUES (1, '随笔', 'notes', '#8E8E93')"),
+    d1.prepare("INSERT OR IGNORE INTO users (id, display_name, status) VALUES (1, '星屿管理员', 'active')"),
+    d1.prepare("INSERT OR IGNORE INTO user_identities (user_id, provider, subject, name) VALUES (1, 'local', 'owner', '星屿管理员')"),
+    d1.prepare("INSERT OR IGNORE INTO site_memberships (user_id, role) VALUES (1, 'owner')"),
     d1.prepare(`UPDATE categories
       SET name = '随笔', slug = 'notes', color = '#8E8E93'
       WHERE slug = 'uncategorized'
@@ -518,5 +575,7 @@ async function initialize() {
     await d1.prepare("INSERT INTO posts_fts(posts_fts) VALUES ('rebuild')").run();
     await d1.prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('posts_fts_version', '2')").run();
   }
+  // Historical merge: every pre-identity article belongs to the site owner.
+  await d1.prepare("UPDATE posts SET author_id = 1, created_by = 1, updated_by = 1 WHERE author_id IS NULL").run();
   await d1.prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('schema_version', ?)").bind(schemaVersion).run();
 }

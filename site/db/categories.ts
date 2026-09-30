@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { ensureDatabase } from "@/db/bootstrap";
-import { isUniqueConstraintError } from "@/db/constraint-error";
-import { categories } from "@/db/schema";
+import { getDb } from ".";
+import { ensureDatabase } from "./bootstrap";
+import { isUniqueConstraintError } from "./constraint-error";
+import { categories } from "./schema";
 import { slugify } from "@/domain/posts/post-input";
 
 type CategoryInput = { name?: string; slug?: string; color?: string };

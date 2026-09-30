@@ -4,6 +4,7 @@ import { cache } from "react";
 import { getDb } from ".";
 import { ensureDatabase } from "./bootstrap";
 import { categories, contentPages, postSlugHistory, posts, siteSettings } from "./schema";
+import { getSpacePath } from "./spaces";
 import { spacePathSql } from "./space-path-sql";
 import { CONTENT_LIMITS, DEFAULT_ABOUT_PAGE, DEFAULT_CONNECT_PAGE, DEFAULT_SITE_SETTINGS } from "@/domain/site/config";
 import { adminReaderSqlFilter, type AdminReaderContext } from "@/domain/reader/admin-reader-context";
@@ -104,6 +105,14 @@ export async function getAdminStats() {
     views: Number(row?.views ?? 0),
     privateArticles: Number(row?.privateArticles ?? 0),
   };
+}
+
+export async function getAdminPost(postId: number) {
+  await ensureDatabase();
+  const rows = await getDb().select().from(posts).where(eq(posts.id, postId)).limit(1);
+  if (!rows[0]) return null;
+  const path = rows[0].spaceId ? await getSpacePath(rows[0].spaceId) : [];
+  return { ...rows[0], spacePath: path.map((item) => item.name).join(" / ") };
 }
 
 export async function getPostBySlug(slug: string) {

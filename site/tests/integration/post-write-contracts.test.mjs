@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { AttachmentCleanupRequiredError, cleanupFailedAttachmentUpload } from "../../db/attachment-cleanup.ts";
+import { AttachmentCleanupRequiredError, cleanupFailedAttachmentUpload, enqueueExpiredUnboundAttachments } from "../../db/attachment-cleanup.ts";
 import {
   callMcpTool,
   closeTestHarness,
@@ -1692,6 +1692,150 @@ test("queued cleanup resolves once the object is gone and validates its input", 
       body: JSON.stringify({ objectKey: "attachments/2026/09/att_cccccccccccccccccccccccccccccccc/never.md" }),
     });
     assert.equal(missing.status, 404, "resolving an unknown object key must not fabricate a recovery");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("expired unbound attachments queue for recycling without deleting anything", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const daysAgo = (days) => {
+      const date = new Date(Date.now() - days * 86400000);
+      return date.toISOString().slice(0, 19).replace("T", " ");
+    };
+    const expiredId = "att_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const freshId = "att_ffffffffffffffffffffffffffffffff";
+    const boundId = "att_11111111111111111111111111111111";
+    const detachedId = "att_dddddddddddddddddddddddddddddddd";
+    const expiredKey = `attachments/2026/07/${expiredId}/stale.md`;
+    const rows = [
+      // Unbound for 40 days: the only candidate.
+      [expiredId, null, expiredKey, daysAgo(40), daysAgo(40)],
+      // Unbound for 5 days: inside the retention window.
+      [freshId, null, `attachments/2026/09/${freshId}/fresh.md`, daysAgo(5), daysAgo(5)],
+      // Created 40 days ago but still bound to an article.
+      [boundId, 1, `attachments/2026/07/${boundId}/bound.md`, daysAgo(40), null],
+      // Detached yesterday from an old article: the unbound clock restarted.
+      [detachedId, null, `attachments/2026/07/${detachedId}/detached.md`, daysAgo(60), daysAgo(1)],
+    ];
+    for (const [publicId, postId, objectKey, createdAt, unboundAt] of rows) {
+      await harness.db.prepare(`INSERT INTO attachments
+          (public_id, post_id, object_key, original_name, content_type, size, sha256, created_at, unbound_at)
+          VALUES (?, ?, ?, 'note.md', 'text/markdown', 4, 'x', ?, ?)`)
+        .bind(publicId, postId, objectKey, createdAt, unboundAt).run();
+    }
+
+    const enqueued = await enqueueExpiredUnboundAttachments(harness.db, 30);
+    assert.equal(enqueued, 1, "only the long-unbound attachment may queue for recycling");
+    const rows1 = await harness.db.prepare(
+      "SELECT public_id, object_key, operation, status, attempts FROM attachment_cleanup_queue",
+    ).all();
+    assert.equal(rows1.results.length, 1);
+    assert.deepEqual(rows1.results[0], {
+      public_id: expiredId, object_key: expiredKey, operation: "expired_unbound", status: "pending", attempts: 1,
+    });
+
+    const secondScan = await enqueueExpiredUnboundAttachments(harness.db, 30);
+    assert.equal(secondScan, 1, "the scan stays idempotent for already queued objects");
+    const attempts = await harness.db.prepare(
+      "SELECT attempts FROM attachment_cleanup_queue WHERE object_key = ?",
+    ).bind(expiredKey).first();
+    assert.equal(attempts?.attempts, 2, "repeated scans bump attempts without duplicating rows");
+
+    await assert.rejects(enqueueExpiredUnboundAttachments(harness.db, 0),
+      /Invalid unbound attachment retention/);
+    assert.equal((await harness.db.prepare("SELECT COUNT(*) AS c FROM attachments").first())?.c, 4,
+      "the expiry scan must never delete attachment rows or R2 objects");
+
+    const queueList = await harness.dispatch("/api/attachments?mode=cleanup-queue", { headers: { cookie } });
+    assert.equal(queueList.status, 200);
+    const items = (await queueList.json()).items;
+    assert.ok(items.some(({ objectKey, operation }) => objectKey === expiredKey && operation === "expired_unbound"),
+      "the admin queue must surface expired unbound attachments");
+
+    await harness.db.prepare("UPDATE attachments SET post_id = 1 WHERE public_id = ?").bind(expiredId).run();
+    const reboundResolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: expiredKey }),
+    });
+    assert.equal(reboundResolve.status, 409, "a newly bound attachment must not be resolved as expired");
+    assert.equal((await harness.db.prepare("SELECT post_id FROM attachments WHERE public_id = ?")
+      .bind(expiredId).first())?.post_id, 1);
+    await harness.db.prepare("UPDATE attachments SET post_id = NULL WHERE public_id = ?").bind(expiredId).run();
+
+    const resolve = await harness.dispatch("/api/attachments", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ objectKey: expiredKey }),
+    });
+    assert.equal(resolve.status, 200, "the operator can resolve after reclaiming the object");
+    assert.equal((await harness.db.prepare("SELECT COUNT(*) AS c FROM attachments WHERE public_id = ?")
+      .bind(expiredId).first())?.c, 0, "resolved expiry must remove the unreachable attachment row");
+    assert.equal(await enqueueExpiredUnboundAttachments(harness.db, 30), 0,
+      "the next scan must not reopen a resolved cleanup item");
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("post writes resolve attribution to the site owner and ignore client identity fields", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+
+    // Admin create: all three columns resolve server-side to the owner (id 1),
+    // even when the payload forges identity fields.
+    const created = await jsonRequest(harness, "/api/posts", {
+      method: "POST", cookie, body: {
+        ...payload("attribution-owner", "owner body"),
+        authorId: 9999, createdBy: 9999, updatedBy: 9999,
+      },
+    });
+    assert.equal(created.status, 201, await created.clone().text());
+    const post = (await created.json()).post;
+    const createdRow = await harness.db.prepare(
+      "SELECT author_id, created_by, updated_by, version FROM posts WHERE id = ?",
+    ).bind(post.id).first();
+    assert.deepEqual(createdRow, { author_id: 1, created_by: 1, updated_by: 1, version: 1 },
+      "creation must attribute the owner and never accept a client-chosen author");
+
+    // A stale update must not touch attribution or content.
+    const stale = await jsonRequest(harness, `/api/posts/${post.id}`, {
+      method: "PATCH", cookie, body: { ...payload("attribution-owner", "race loser"), version: 99 },
+    });
+    assert.equal(stale.status, 409);
+    const afterStale = await harness.db.prepare(
+      "SELECT content, author_id, created_by, updated_by, version FROM posts WHERE id = ?",
+    ).bind(post.id).first();
+    assert.deepEqual(afterStale, { content: "owner body", author_id: 1, created_by: 1, updated_by: 1, version: 1 },
+      "a rejected stale edit must leave attribution and content unchanged");
+
+    // A clean admin edit only refreshes updated_by.
+    const updated = await jsonRequest(harness, `/api/posts/${post.id}`, {
+      method: "PATCH", cookie, body: { ...payload("attribution-owner", "owner body v2"), version: 1 },
+    });
+    assert.equal(updated.status, 200, await updated.clone().text());
+    const afterUpdate = await harness.db.prepare(
+      "SELECT author_id, created_by, updated_by FROM posts WHERE id = ?",
+    ).bind(post.id).first();
+    assert.deepEqual(afterUpdate, { author_id: 1, created_by: 1, updated_by: 1 });
+
+    // MCP drafts flow through the same owner resolution; the client label
+    // stays in the audit stream instead of becoming an account.
+    const mcpCreated = await callMcpTool(harness, {
+      name: "create_draft", token: TEST_LEGACY_MCP_TOKEN,
+      arguments: { title: "MCP attribution", slug: "attribution-mcp", change_summary: "Attribution contract" },
+    });
+    assert.equal(mcpCreated.isError, undefined, JSON.stringify(mcpCreated.structuredContent));
+    const mcpPost = await harness.db.prepare("SELECT id, author_id, created_by, updated_by FROM posts WHERE slug = ?")
+      .bind("attribution-mcp").first();
+    assert.deepEqual(mcpPost, { id: mcpPost?.id, author_id: 1, created_by: 1, updated_by: 1 },
+      "MCP creates must attribute the owner, not the remote client");
+    await jsonRequest(harness, `/api/posts/${mcpPost.id}`, { method: "DELETE", cookie, body: { version: 1 } });
+    await jsonRequest(harness, `/api/posts/${post.id}`, { method: "DELETE", cookie, body: { version: 2 } });
   } finally {
     await closeTestHarness(harness);
   }

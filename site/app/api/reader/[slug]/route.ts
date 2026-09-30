@@ -5,8 +5,8 @@ import {
   getPreviousAdminPost,
   resolvePublicPost,
   getPreviousPublishedPost,
-} from "../../../../db/queries";
-import { isAdminRequest, unauthorized } from "../../admin-auth";
+} from "@/db/queries";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
 import { parseAdminReaderContext } from "@/domain/reader/admin-reader-context";
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {

@@ -32,20 +32,26 @@ const generatedMigration = async () => {
 };
 
 test("content, settings and view data are persisted in D1", async () => {
-  const [schema, bootstrap, settingsRoute, pageRoute, viewRoute] = await Promise.all([
+  const [schema, bootstrap, settingsRoute, pageRoute, viewRoute, viewTracking] = await Promise.all([
     source("db/schema.ts"), source("db/bootstrap.ts"), source("app/api/settings/route.ts"),
     source("app/api/pages/[slug]/route.ts"), source("app/api/views/[slug]/route.ts"),
+    source("db/view-tracking.ts"),
   ]);
   assert.match(schema, /siteSettings = sqliteTable\("site_settings"/);
   assert.match(schema, /contentPages = sqliteTable\("content_pages"/);
   assert.match(schema, /postViews = sqliteTable\("post_views"/);
+  assert.match(schema, /viewRequestLimits = sqliteTable\("view_request_limits"/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS site_settings/);
   assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS content_pages/);
   assert.doesNotMatch(bootstrap, /archiveSeeds|seedContent|headingShowcaseContent/);
   assert.match(settingsRoute, /isAdminRequest/);
   assert.match(pageRoute, /isAdminRequest/);
-  assert.match(viewRoute, /INSERT OR IGNORE INTO post_views/);
-  assert.match(viewRoute, /view_count = view_count \+ 1/);
+  assert.match(viewTracking, /INSERT OR IGNORE INTO post_views/);
+  assert.match(viewTracking, /view_count = view_count \+ 1/);
+  assert.match(viewTracking, /cf-connecting-ip/);
+  assert.match(viewTracking, /POST_VIEWS_RETENTION_DAYS = 90/);
+  assert.match(viewRoute, /status: 204/);
+  assert.match(viewRoute, /status: 429/);
 });
 
 test("development and production content stay on isolated databases", async () => {
@@ -166,7 +172,7 @@ test("remote MCP separates read approvals from important writes and records rece
 test("editor assets and post parsing stay scoped to their owners", async () => {
   const [rootLayout, adminLayout, postRoute, postInput, categoriesRoute, editor, transitions] = await Promise.all([
     source("app/layout.tsx"), source("app/admin/layout.tsx"), source("app/api/posts/route.ts"),
-    source("domain/posts/post-input.ts"), source("server/services/categories.ts"),
+    source("domain/posts/post-input.ts"), source("db/categories.ts"),
     source("features/admin/VditorEditor.tsx"), source("app/RouteTransition.tsx"),
   ]);
   assert.doesNotMatch(rootLayout, /vditor\/index\.css/);
@@ -197,12 +203,12 @@ test("public entry keeps rich reading assets behind interaction boundaries", asy
   assert.ok(mainCssSize <= 270_000, `main public stylesheet exceeded 270 KB: ${mainCssSize} bytes`);
 });
 
-test("admin write routes delegate business rules to server services", async () => {
+test("admin write routes delegate business rules to db modules", async () => {
   const [postRoute, categoryRoute, categoryItemRoute, settingsRoute, pageRoute, postService, categoryService, siteService] = await Promise.all([
     source("app/api/posts/[id]/route.ts"), source("app/api/categories/route.ts"),
     source("app/api/categories/[id]/route.ts"), source("app/api/settings/route.ts"),
-    source("app/api/pages/[slug]/route.ts"), source("server/services/admin-posts.ts"),
-    source("server/services/categories.ts"), source("server/services/site-content.ts"),
+    source("app/api/pages/[slug]/route.ts"), source("db/post-write.ts"),
+    source("db/categories.ts"), source("db/site-content.ts"),
   ]);
   assert.match(postRoute, /getAdminPost/);
   assert.match(postRoute, /deleteAdminPost/);
@@ -335,10 +341,48 @@ test("admin and markdown editor share the site theme palette", async () => {
   assert.match(toggle,/xingyu:theme-change/);
 });
 
+test("CSP ships report-only with a strict draft and a bounded violation endpoint", async () => {
+  const [csp, worker, wranglerConfig] = await Promise.all([
+    source("domain/security/csp.ts"), source("worker/index.ts"),
+    source("wrangler.production.jsonc"),
+  ]);
+  assert.match(csp,/default-src 'self'/);
+  assert.match(csp,/script-src 'self'/);
+  assert.match(csp,/object-src 'none'/);
+  assert.match(csp,/frame-ancestors 'self'/);
+  assert.match(csp,/Content-Security-Policy-Report-Only/);
+  assert.match(csp,/report-uri/);
+  const policyBody = csp.slice(csp.indexOf("CSP_POLICY"));
+  assert.doesNotMatch(policyBody,/unsafe-eval/);
+  assert.match(policyBody,/style-src 'self' 'unsafe-inline'/);
+  assert.match(worker,/applyCsp/);
+  assert.match(worker,/CSP_REPORT_PATH/);
+  assert.match(worker,/csp_violation/);
+  assert.match(wranglerConfig,/"CSP_MODE": "report-only"/);
+});
+
+test("unbound attachments expire into the admin queue via cron and are never auto-deleted", async () => {
+  const [cleanup, worker, wranglerConfig, postWrite, oneZeroOneFour] = await Promise.all([
+    source("db/attachment-cleanup.ts"), source("worker/index.ts"),
+    source("wrangler.production.jsonc"), source("db/post-write.ts"),
+    source("drizzle/0014_hot_the_stranger.sql"),
+  ]);
+  assert.match(cleanup,/UNBOUND_ATTACHMENT_RETENTION_DAYS = 30/);
+  assert.match(cleanup,/expired_unbound/);
+  assert.match(cleanup,/ON CONFLICT\(object_key\) DO UPDATE/);
+  assert.match(cleanup,/datetime\('now', '-' \|\| \? \|\| ' days'\)/);
+  assert.match(worker,/enqueueExpiredUnboundAttachments/);
+  assert.match(worker,/async scheduled/);
+  assert.match(wranglerConfig,/"crons": \["17 3 \* \* \*"\]/);
+  assert.match(postWrite,/unbound_at = CURRENT_TIMESTAMP/);
+  assert.match(oneZeroOneFour,/ALTER TABLE `attachments` ADD `unbound_at` text/);
+  assert.match(oneZeroOneFour,/UPDATE `attachments`/);
+});
+
 test("knowledge spaces are durable, arbitrarily nested and isolated from the public blog", async () => {
   const [
     schema, bootstrap, migration, queries, spaces, postInput, postWrite,
-    admin, articleEditor, sidebar, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute,
+    admin, articleEditor, sidebar, spacePanel, spacePicker, postsRoute, postRoute, viewsRoute, viewTracking,
   ] = await Promise.all([
     source("db/schema.ts"), source("db/bootstrap.ts"), generatedMigration(),
     source("db/queries.ts"), source("db/spaces.ts"), source("domain/posts/post-input.ts"),
@@ -346,12 +390,12 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
     source("features/admin/AdminSidebar.tsx"),
     source("features/admin/AdminSpacesPanel.tsx"), source("features/admin/AdminSpacePicker.tsx"),
     source("app/api/posts/route.ts"), source("app/api/posts/[id]/route.ts"),
-    source("app/api/views/[slug]/route.ts"),
+    source("app/api/views/[slug]/route.ts"), source("db/view-tracking.ts"),
   ]);
   assert.match(schema,/spaces = sqliteTable\("spaces"/);
   assert.match(schema,/parentId: integer\("parent_id"\)/);
   assert.match(schema,/spaceId: integer\("space_id"\)/);
-  assert.match(bootstrap,/schemaVersion = "15"/);
+  assert.match(bootstrap,/schemaVersion = "18"/);
   assert.match(bootstrap,/CREATE TABLE IF NOT EXISTS spaces/);
   assert.match(bootstrap,/ALTER TABLE posts ADD COLUMN space_id/);
   assert.match(migration,/CREATE TABLE `spaces`/);
@@ -369,7 +413,8 @@ test("knowledge spaces are durable, arbitrarily nested and isolated from the pub
   assert.match(queries,/p\.space_id IS NULL/);
   assert.match(postsRoute,/scope === "all" \? "all" : scope === "private" \? "private" : "public"/);
   assert.match(postRoute,/hasOwnProperty\.call\(payload,"spaceId"\)\?payload\.spaceId:current\.spaceId/);
-  assert.match(viewsRoute,/space_id IS NULL/);
+  assert.match(viewTracking,/space_id IS NULL/);
+  assert.match(viewsRoute,/trackPostView/);
   assert.match(sidebar,/文章[\s\S]*知识空间[\s\S]*接入/);
   assert.match(articleEditor,/私有知识文章 · 仅管理员与 MCP 可检索/);
   assert.match(admin,/确认移出知识空间吗/);
@@ -534,4 +579,74 @@ test("private article preview links are scoped, expiring, revocable and never pu
   assert.match(spaces,/onShareArticle/);
   assert.match(worker,/pathname\.startsWith\("\/preview"\)/);
   assert.match(worker,/headers\.set\("Cache-Control",\s*"no-store"\)/);
+});
+
+test("admin diagnostics endpoint and cron health gate cover the core-relations audit", async () => {
+  const [health, diagnosticsRoute, workerEntry, bootstrap] = await Promise.all([
+    source("db/health.ts"),
+    source("app/api/admin/diagnostics/route.ts"),
+    source("worker/index.ts"),
+    source("db/bootstrap.ts"),
+  ]);
+  assert.match(bootstrap,/export const schemaVersion = "18"/);
+  assert.match(health,/export async function collectSiteHealth/);
+  for (const key of [
+    "posts_missing_category", "posts_missing_space", "spaces_missing_parent",
+    "spaces_unreachable_from_root", "history_missing_post", "history_conflicts_current_slug",
+    "attachments_missing_post", "preview_tokens_missing_post", "views_missing_post",
+    "codes_missing_oauth_client", "access_tokens_missing_oauth_client", "refresh_tokens_missing_oauth_client",
+    "consents_missing_oauth_client", "posts_missing_author", "identities_missing_user",
+    "memberships_missing_user",
+  ]) {
+    assert.match(health, new RegExp(`"${key}"`), `missing health audit key ${key}`);
+  }
+  assert.match(health,/d1_migrations/);
+  assert.match(health,/attachment_cleanup_queue WHERE status = 'pending'/);
+  assert.match(health,/site_memberships WHERE role = 'owner'/);
+  assert.match(diagnosticsRoute,/isAdminRequest/);
+  assert.match(diagnosticsRoute,/ensureDatabase\(\)/);
+  assert.match(diagnosticsRoute,/collectSiteHealth\(env\.DB, schemaVersion\)/);
+  assert.match(workerEntry,/import \{ schemaVersion \} from "@\/db\/bootstrap"/);
+  assert.match(workerEntry,/site_health_anomaly/);
+  assert.match(workerEntry,/site_health_check_failed/);
+});
+
+test("P2 consistency cleanup: services merged, auth relocated, imports aliased, prototypes removed", async () => {
+  const [categoriesRoute, settingsRoute, postsRoute, adminPage, queries, postWrite, categories, siteContent, adminAuth, workerEntry, diagnosticsRoute, blogHome] = await Promise.all([
+    source("app/api/categories/route.ts"), source("app/api/settings/route.ts"),
+    source("app/api/posts/[id]/route.ts"), source("app/admin/page.tsx"),
+    source("db/queries.ts"), source("db/post-write.ts"),
+    source("db/categories.ts"), source("db/site-content.ts"),
+    source("server/auth/admin-auth.ts"), source("worker/index.ts"),
+    source("app/api/admin/diagnostics/route.ts"), source("features/home/BlogHomeExperience.tsx"),
+  ]);
+  // C1: server/services 半吊子分层的逻辑并入对应 db 模块
+  assert.match(categoriesRoute, /from "@\/db\/categories"/);
+  assert.match(settingsRoute, /from "@\/db\/site-content"/);
+  assert.match(postsRoute, /from "@\/db\/queries"/);
+  assert.match(postsRoute, /from "@\/db\/post-write"/);
+  assert.match(queries, /export async function getAdminPost/);
+  assert.match(postWrite, /export async function deleteAdminPost/);
+  assert.match(categories, /CategoryServiceError/);
+  assert.match(siteContent, /upsertContentPage/);
+  assert.doesNotMatch(
+    [categoriesRoute, settingsRoute, postsRoute, adminPage, queries, postWrite, categories, siteContent].join("\n"),
+    /server\/services/,
+    "no application module may reference the removed server/services layer",
+  );
+  // C2: 共享鉴权库迁至 server/auth，跨边界导入统一走 @/ alias
+  assert.match(adminAuth, /from "@\/db\/bootstrap"/);
+  assert.match(adminAuth, /from "@\/db\/admin-session"/);
+  assert.match(postsRoute, /from "@\/server\/auth\/admin-auth"/);
+  assert.match(diagnosticsRoute, /from "@\/server\/auth\/admin-auth"/);
+  assert.match(workerEntry, /from "@\/db\/(bootstrap|health|attachment-cleanup|view-tracking)"/);
+  assert.doesNotMatch(blogHome, /from "@\/features\//, "feature modules must import siblings via relative paths");
+  // C3: 根目录静态原型与 services 目录不复存在
+  const missingFile = async (relative) => {
+    try { await stat(new URL(relative, import.meta.url)); return false; }
+    catch (error) { if (error?.code === "ENOENT") return true; throw error; }
+  };
+  assert.ok(await missingFile("../../index.html"), "root prototype index.html must be removed");
+  assert.ok(await missingFile("../../article.html"), "root prototype article.html must be removed");
+  assert.ok(await missingFile("../server/services/categories.ts"), "server/services directory must be removed");
 });

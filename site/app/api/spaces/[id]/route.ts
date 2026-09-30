@@ -1,5 +1,5 @@
-import { isAdminRequest, unauthorized } from "../../admin-auth";
-import { deleteSpace, getSpaceOverview, SpaceWriteError, updateSpace } from "../../../../db/spaces";
+import { isAdminRequest, unauthorized } from "@/server/auth/admin-auth";
+import { deleteSpace, getSpaceOverview, SpaceWriteError, updateSpace } from "@/db/spaces";
 
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
   if(!(await isAdminRequest(request)))return unauthorized();

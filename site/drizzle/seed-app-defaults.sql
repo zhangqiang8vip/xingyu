@@ -109,3 +109,15 @@ INSERT OR IGNORE INTO oauth_clients
   (client_id, client_name, client_type, client_secret_hash, redirect_uris, allowed_scopes, token_endpoint_auth_method, enabled)
 VALUES ('grok-xingyu', 'Grok · XINGYU', 'public', NULL, '[]',
   'xingyu.read xingyu.draft xingyu.publish offline_access', 'none', 1);
+--> statement-breakpoint
+-- Identity base: a single site owner with its local identity. The final UPDATE
+-- also repairs attribution for rows imported after the migration chain already
+-- ran its own backfill, so the relation audit stays meaningful after cutovers.
+INSERT OR IGNORE INTO users (id, display_name, status) VALUES (1, '星屿管理员', 'active');
+--> statement-breakpoint
+INSERT OR IGNORE INTO user_identities (user_id, provider, subject, name)
+  VALUES (1, 'local', 'owner', '星屿管理员');
+--> statement-breakpoint
+INSERT OR IGNORE INTO site_memberships (user_id, role) VALUES (1, 'owner');
+--> statement-breakpoint
+UPDATE posts SET author_id = 1, created_by = 1, updated_by = 1 WHERE author_id IS NULL;

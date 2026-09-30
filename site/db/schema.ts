@@ -40,6 +40,9 @@ export const posts = sqliteTable("posts", {
   publishedAt: text("published_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  authorId: integer("author_id"),
+  createdBy: integer("created_by"),
+  updatedBy: integer("updated_by"),
 }, (table) => [
   uniqueIndex("posts_public_id_uidx").on(table.publicId),
   uniqueIndex("posts_slug_uidx").on(table.slug),
@@ -52,6 +55,39 @@ export const posts = sqliteTable("posts", {
   index("posts_space_published_idx").on(table.spaceId, table.publishedAt, table.id),
   index("posts_updated_idx").on(table.updatedAt),
   index("posts_admin_cursor_idx").on(table.updatedAt, table.id),
+]);
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  displayName: text("display_name").notNull().default("星屿管理员"),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const userIdentities = sqliteTable("user_identities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  provider: text("provider").notNull(),
+  subject: text("subject").notNull(),
+  email: text("email"),
+  name: text("name"),
+  avatarUrl: text("avatar_url"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastLoginAt: text("last_login_at"),
+}, (table) => [
+  uniqueIndex("user_identities_provider_subject_uidx").on(table.provider, table.subject),
+  index("user_identities_user_idx").on(table.userId),
+]);
+
+export const siteMemberships = sqliteTable("site_memberships", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  role: text("role").notNull().default("owner"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("site_memberships_user_id_uidx").on(table.userId),
+  index("site_memberships_role_idx").on(table.role),
 ]);
 
 export const postSlugHistory = sqliteTable("post_slug_history", {
@@ -74,6 +110,7 @@ export const attachments = sqliteTable("attachments", {
   size: integer("size").notNull(),
   sha256: text("sha256").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  unboundAt: text("unbound_at"),
 }, (table) => [
   uniqueIndex("attachments_public_id_uidx").on(table.publicId),
   uniqueIndex("attachments_object_key_uidx").on(table.objectKey),
@@ -155,6 +192,14 @@ export const postViews = sqliteTable("post_views", {
   primaryKey({ columns: [table.postId, table.visitorHash, table.viewedOn] }),
   index("post_views_date_idx").on(table.viewedOn),
 ]);
+
+export const viewRequestLimits = sqliteTable("view_request_limits", {
+  identityHash: text("identity_hash").primaryKey(),
+  attempts: integer("attempts").notNull().default(0),
+  windowStarted: integer("window_started").notNull(),
+  blockedUntil: integer("blocked_until").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+});
 
 export const mcpActivity = sqliteTable("mcp_activity", {
   id: integer("id").primaryKey({ autoIncrement: true }),
