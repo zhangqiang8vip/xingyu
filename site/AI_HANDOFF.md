@@ -178,7 +178,7 @@ site/
 | 本地正式预览 | `npm run dev:production` | 独立的本地 production-preview D1/R2（schema 18） | 检查空库/生产外观 |
 | 线上正式 | `npm run deploy:production` | Cloudflare D1 `xingyu-production-v2`（`migration-only`）与线上 R2 | 对公众可见 |
 
-`db/bootstrap.ts` 会校验 `app_environment` / `app_meta.schema_version` 与必需表、索引、触发器和 FTS 结构；环境身份不匹配或结构不满足当前 schema 契约（代码内 `schemaVersion`，现为 **18**）时 fail fast，**绝不在请求期建表或改结构**。若同一个数据库被误接到另一环境，应用同样拒绝启动；**不要为了“先跑起来”而删除这些保护。**
+`db/bootstrap.ts` 会校验 `app_environment` / `app_meta.schema_version` 与必需表、索引、触发器和 FTS 结构；环境身份不匹配或结构不满足当前 schema 契约（代码内 `schemaVersion`，现为 **19**）时 fail fast，**绝不在请求期建表或改结构**。若同一个数据库被误接到另一环境，应用同样拒绝启动；**不要为了“先跑起来”而删除这些保护。**
 
 旧 Blue 库 `xingyu-production` 与旧 Worker 版本只是切换前的历史快照；切换后 Green 已产生新写入，**禁止直接切回旧库、旧导出或以旧版本代码对接 Green，否则会丢失切换后的文章、令牌与审计**。任何换库都必须从届时最新 Green 重新导出、逐表核对并在隔离库验证（详见 `docs/plans/` 两份路线图记录）。
 

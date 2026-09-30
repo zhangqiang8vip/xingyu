@@ -22,7 +22,7 @@ import ModalPostLink from "../reader/ModalPostLink";
 import type { AdminReaderContext, AdminReaderReturnTarget } from "@/domain/reader/admin-reader-context";
 import { adminLocationHref, parseAdminLocation, type AdminLocation } from "@/domain/admin/location";
 
-const emptyForm = (categoryId = 1,spaceId:number|null=null,spacePath=""): ArticleForm => ({ title: "", slug: "", excerpt: "", content: "", categoryId, spaceId,spacePath,status: "draft", featured: false, publishedAt:null });
+const emptyForm = (categoryId = 1,spaceId:number|null=null,spacePath=""): ArticleForm => ({ title: "", slug: "", excerpt: "", content: "", categoryId, spaceId,sortOrder:0,spacePath,status: "draft", featured: false, publishedAt:null });
 type AdminInitialLocation=AdminLocation;
 
 export default function AdminClient({ categories:initialCategories, settings, connectPage, aboutPage, stats:initialStats, connections, initialArticle, initialLocation, userName, signOutPath }: { categories: AdminCategory[]; settings:SiteSettingsForm; connectPage:EditablePage; aboutPage:EditablePage; stats:AdminStats; connections:AdminMcpConnection[]; initialArticle:ArticleForm|null; initialLocation:AdminInitialLocation; userName: string; signOutPath: string }) {
@@ -171,6 +171,7 @@ export default function AdminClient({ categories:initialCategories, settings, co
     const returnTarget=readerReturnRef.current;
     readerReturnRef.current=null;
     setMessage("保存成功"); setStudio(null); setForm(null);
+    window.dispatchEvent(new Event("xingyu:spaces-changed"));
     writeLocation(currentLocation());
     await Promise.all([load(), loadStats()]);
     if(returnTarget)openAdminReader(returnTarget);

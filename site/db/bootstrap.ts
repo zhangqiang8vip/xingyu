@@ -6,7 +6,7 @@ import { PUBLIC_CACHE_SCHEMA_STATEMENTS } from "./public-cache-schema";
 let ready: Promise<void> | null = null;
 
 /** 当前 worker 期望的 D1 schema 版本，供健康检查与迁移门禁共用。 */
-export const schemaVersion = "18";
+export const schemaVersion = "19";
 
 const requiredUniqueIndexes = {
   attachments_object_key_uidx: { table: "attachments", columns: ["object_key"] },
@@ -96,6 +96,11 @@ async function initialize() {
     if (!versionColumn || versionColumn.type.toUpperCase() !== "INTEGER"
       || versionColumn.notnull !== 1 || Number(versionColumn.dflt_value) !== 1) {
       throw new Error("D1 posts.version is missing or incompatible with optimistic writes");
+    }
+    const orderColumn = (postColumns.results ?? []).find(({ name }) => name === "sort_order");
+    if (!orderColumn || orderColumn.type.toUpperCase() !== "INTEGER"
+      || orderColumn.notnull !== 1 || Number(orderColumn.dflt_value) !== 0) {
+      throw new Error("D1 posts.sort_order is missing or incompatible with browsing order");
     }
     const nonUnique = (objects.results ?? []).filter(({ type, name, sql: definition }) =>
       type === "index" && requiredMigrationObjects.index.some((required) => required === name)
@@ -494,6 +499,9 @@ async function initialize() {
   if (!(postColumns.results ?? []).some((column) => column.name === "version")) {
     await d1.prepare("ALTER TABLE posts ADD COLUMN version INTEGER NOT NULL DEFAULT 1").run();
   }
+  if (!(postColumns.results ?? []).some((column) => column.name === "sort_order")) {
+    await d1.prepare("ALTER TABLE posts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0").run();
+  }
   const attachmentColumns = await d1.prepare("PRAGMA table_info(attachments)").all<{ name: string }>();
   if (!(attachmentColumns.results ?? []).some((column) => column.name === "unbound_at")) {
     await d1.prepare("ALTER TABLE attachments ADD COLUMN unbound_at TEXT").run();
@@ -514,6 +522,7 @@ async function initialize() {
   }
   await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS posts_public_id_uidx ON posts(public_id)").run();
   await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_updated_idx ON posts(space_id, updated_at DESC, id DESC)").run();
+  await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_sort_idx ON posts(space_id, sort_order ASC, id ASC)").run();
   await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_status_updated_idx ON posts(space_id, status, updated_at DESC, id DESC)").run();
   await d1.prepare("CREATE INDEX IF NOT EXISTS posts_space_published_idx ON posts(space_id, published_at DESC, id DESC)").run();
   await d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS post_slug_history_slug_uidx ON post_slug_history(slug)").run();

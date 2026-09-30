@@ -25,6 +25,7 @@ export type SpacePostRow={
   id:number;publicId:string;title:string;slug:string;excerpt:string;status:"draft"|"published";
   featured:number|boolean;viewCount:number;publishedAt:string|null;updatedAt:string;
   categoryId:number;categoryName:string|null;categoryColor:string|null;spaceId:number;spacePath:string;
+  sortOrder:number;orderPath:string;
 };
 
 export class SpaceWriteError extends Error {
@@ -205,6 +206,7 @@ function spaceActivity(result: D1Result | undefined) {
 
 export async function createSpace(input:{name:string;slug?:string;parentId?:number|null;sortOrder?:number},audit?:SpaceWriteAudit){
   await ensureDatabase();
+  if(input.sortOrder!==undefined&&!Number.isSafeInteger(input.sortOrder))throw new SpaceWriteError("浏览顺序必须是整数");
   const name=input.name.trim();
   if(!name)throw new SpaceWriteError("空间名称不能为空");
   if(name.length>100)throw new SpaceWriteError("空间名称不能超过 100 个字符");
@@ -233,6 +235,7 @@ export async function createSpace(input:{name:string;slug?:string;parentId?:numb
 
 export async function updateSpace(spaceId:number,input:{name?:string;slug?:string;parentId?:number|null;sortOrder?:number},audit?:SpaceWriteAudit){
   await ensureDatabase();
+  if(input.sortOrder!==undefined&&!Number.isSafeInteger(input.sortOrder))throw new SpaceWriteError("浏览顺序必须是整数");
   const current=await getSpace(spaceId);
   if(!current)throw new SpaceWriteError("空间不存在",404);
   const name=input.name?.trim()??current.name;
@@ -418,21 +421,27 @@ export async function searchSpaces(query:string,limit=20,options?:{rootId?:numbe
   return Promise.all((result.results??[]).map(async(space)=>({...space,path:await getSpacePath(space.id)})));
 }
 
-export async function listSpacePosts(input:{spaceId:number;includeDescendants?:boolean;query?:string;status?:"all"|"draft"|"published";category?:string;cursor?:string;limit?:number}){
+export async function listSpacePosts(input:{spaceId:number;includeDescendants?:boolean;allSpaces?:boolean;query?:string;status?:"all"|"draft"|"published";category?:string;cursor?:string;limit?:number}){
   await ensureDatabase();
   const limit=Math.max(1,Math.min(50,input.limit??20));
-  const params:Array<string|number>=[input.spaceId];
-  const conditions=[input.includeDescendants
-    ? `p.space_id IN (
-        WITH RECURSIVE descendants(id) AS (
-          SELECT id FROM spaces WHERE id=?
-          UNION
-          SELECT s.id FROM spaces s JOIN descendants ON s.parent_id=descendants.id
-        )
-        SELECT id FROM descendants
-      )`
-    : "p.space_id=?"];
-  let from="FROM posts p LEFT JOIN categories c ON c.id=p.category_id";
+  const params:Array<string|number>=input.allSpaces?[]:[input.spaceId];
+  const conditions:string[]=[];
+  if(!input.allSpaces&&!input.includeDescendants){conditions.push("p.space_id=?");params.push(input.spaceId)}
+  const roots=input.allSpaces
+    ? "SELECT id,printf('%010d/',sibling_rank),printf('/%d/',id) FROM ranked WHERE parent_id IS NULL"
+    : "SELECT id,'',printf('/%d/',id) FROM spaces WHERE id=?";
+  const hierarchy=`WITH RECURSIVE ranked AS (
+      SELECT id,parent_id,row_number() OVER (
+        PARTITION BY parent_id ORDER BY sort_order ASC,name COLLATE NOCASE ASC,id ASC
+      ) AS sibling_rank FROM spaces
+    ), hierarchy(id,order_path,visited) AS (
+      ${roots}
+      UNION ALL
+      SELECT child.id,h.order_path||printf('%010d/',child.sibling_rank),h.visited||printf('%d/',child.id)
+      FROM ranked child JOIN hierarchy h ON child.parent_id=h.id
+      WHERE instr(h.visited,printf('/%d/',child.id))=0
+    )`;
+  let from="FROM posts p JOIN hierarchy h ON h.id=p.space_id LEFT JOIN categories c ON c.id=p.category_id";
   const query=input.query?.trim()??"";
   if(Array.from(query).length>=3){
     from+=" JOIN posts_fts ON posts_fts.rowid=p.id";
@@ -447,39 +456,39 @@ export async function listSpacePosts(input:{spaceId:number;includeDescendants?:b
   if(input.category&&input.category!=="all"){conditions.push("c.slug=?");params.push(input.category)}
   const cursor=decodeSpaceCursor(input.cursor);
   if(cursor){
-    conditions.push("(p.updated_at < ? OR (p.updated_at = ? AND p.id < ?))");
-    params.push(cursor.updatedAt,cursor.updatedAt,cursor.id);
+    conditions.push("(h.order_path > ? OR (h.order_path = ? AND (p.sort_order > ? OR (p.sort_order = ? AND p.id > ?))))");
+    params.push(cursor.path,cursor.path,cursor.sortOrder,cursor.sortOrder,cursor.id);
   }
-  const result=await env.DB.prepare(`SELECT
+  const result=await env.DB.prepare(`${hierarchy} SELECT
       p.id,p.public_id AS publicId,p.title,p.slug,p.excerpt,p.status,p.featured,
       p.view_count AS viewCount,p.published_at AS publishedAt,p.updated_at AS updatedAt,
       p.category_id AS categoryId,c.name AS categoryName,c.color AS categoryColor,p.space_id AS spaceId,
+      p.sort_order AS sortOrder,h.order_path AS orderPath,
       ${spacePathSql} AS spacePath
     ${from}
-    WHERE ${conditions.join(" AND ")}
-    ORDER BY p.updated_at DESC,p.id DESC LIMIT ?`).bind(...params,limit+1).all<SpacePostRow>();
+    ${conditions.length?`WHERE ${conditions.join(" AND ")}`:""}
+    ORDER BY h.order_path ASC,p.sort_order ASC,p.id ASC LIMIT ?`).bind(...params,limit+1).all<SpacePostRow>();
   const all=result.results??[];
   const hasMore=all.length>limit;
   const rows=all.slice(0,limit);
-  const last=rows.at(-1) as {id?:number;updatedAt?:string}|undefined;
+  const last=rows.at(-1);
   return {
     rows:rows.map((row)=>({...row,featured:Boolean(row.featured)})),
-    nextCursor:hasMore&&last?.id&&last.updatedAt?encodeSpaceCursor(last.updatedAt,last.id):null,
+    nextCursor:hasMore&&last?encodeSpaceCursor(last.orderPath,last.sortOrder,last.id):null,
   };
 }
 
-function encodeSpaceCursor(updatedAt:string,id:number){
-  return btoa(`${updatedAt}|${id}`).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
+function encodeSpaceCursor(path:string,sortOrder:number,id:number){
+  return btoa(JSON.stringify({path,sortOrder,id})).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
 }
 
 function decodeSpaceCursor(cursor?:string){
-  if(!cursor||cursor.length>180)return null;
+  if(!cursor||cursor.length>4096)return null;
   try{
     const normalized=cursor.replace(/-/g,"+").replace(/_/g,"/");
-    const decoded=atob(normalized+"=".repeat((4-normalized.length%4)%4));
-    const separator=decoded.lastIndexOf("|");
-    const updatedAt=decoded.slice(0,separator);
-    const id=Number(decoded.slice(separator+1));
-    return separator>0&&updatedAt&&Number.isInteger(id)&&id>0?{updatedAt,id}:null;
+    const decoded=JSON.parse(atob(normalized+"=".repeat((4-normalized.length%4)%4))) as {path?:unknown;sortOrder?:unknown;id?:unknown};
+    return typeof decoded.path==="string"&&/^(?:\d{10}\/)*$/.test(decoded.path)
+      &&Number.isSafeInteger(decoded.sortOrder)&&Number.isSafeInteger(decoded.id)&&Number(decoded.id)>0
+      ?{path:decoded.path,sortOrder:Number(decoded.sortOrder),id:Number(decoded.id)}:null;
   }catch{return null}
 }

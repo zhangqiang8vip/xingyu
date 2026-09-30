@@ -88,6 +88,7 @@ export default function AdminArticleEditor({
         <section className="editor-section publish-section">
           <div className="editor-section-title"><span>03</span><div><b>发布设置</b><small>决定文章如何出现在前台</small></div></div>
           <div className="form-row"><label>{form.spaceId?"内容状态":"发布状态"}<select value={form.status} onChange={(event)=>onChange({...form,status:event.target.value as ArticleForm["status"]})}><option value="draft">保存为草稿</option><option value="published">{form.spaceId?"标记为内容完成":"立即发布"}</option></select></label><label>发布时间<input type="datetime-local" value={toLocalDateTime(form.publishedAt)} onChange={(event)=>onChange({...form,publishedAt:event.target.value?new Date(event.target.value).toISOString():null})}/></label></div>
+          {form.spaceId&&<label>浏览顺序（仅与本空间直属文章比较，数字越小越靠前）<input type="number" step="1" value={form.sortOrder??0} onChange={(event)=>onChange({...form,sortOrder:Number(event.target.value)})}/></label>}
           {!form.spaceId&&<label className="check"><input type="checkbox" checked={form.featured} onChange={(event)=>onChange({...form,featured:event.target.checked})}/><span><b>设为精选文章</b><small>优先展示在首页首张大卡片</small></span></label>}
         </section>
         {message&&<p className="form-message">{message}</p>}

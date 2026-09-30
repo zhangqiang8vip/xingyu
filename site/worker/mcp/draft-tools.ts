@@ -87,18 +87,19 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       excerpt: z.string().max(1_000).optional().default(""),
       category: CATEGORY_SCHEMA.optional(),
       space: SPACE_SCHEMA.optional(),
+      sort_order: z.number().int().optional().describe("知识空间内直属文章的浏览顺序；数字越小越靠前"),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional().default(false),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("创建新的 Markdown 文章草稿"),
     },
     outputSchema: { post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  }, async ({ title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
+  }, async ({ title, content_markdown, excerpt, category, space, sort_order, slug, featured, change_summary }) => {
     try {
       requireScope(auth, "xingyu.draft");
       const resolvedCategory = await resolveCategory(category);
       const resolvedSpace = space ? await resolveSpace(space) : null;
-      const changedFields = ["title", "slug", "excerpt", "content_markdown", "category", "space", "featured"];
+      const changedFields = ["title", "slug", "excerpt", "content_markdown", "category", "space", "featured", ...(sort_order===undefined?[]:["sort_order"])];
       const post = await createPostRecord({
         title,
         slug: slugify(slug || title),
@@ -106,6 +107,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
         content: content_markdown,
         categoryId: resolvedCategory.id,
         spaceId: resolvedSpace?.id ?? null,
+        sortOrder: sort_order,
         status: "draft",
         featured: resolvedSpace ? false : featured,
         publishedAt: null,
@@ -147,13 +149,14 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
       excerpt: z.string().max(1_000).optional(),
       category: CATEGORY_SCHEMA.optional(),
       space: SPACE_SCHEMA.nullable().optional().describe("目标知识空间；传 null 表示移回公开博客，省略则保持当前位置"),
+      sort_order: z.number().int().optional().describe("知识空间内直属文章的浏览顺序；数字越小越靠前"),
       slug: z.string().trim().max(180).optional(),
       featured: z.boolean().optional(),
       change_summary: CHANGE_SUMMARY_SCHEMA.optional().default("更新文章内容"),
     },
     outputSchema: { post: z.record(z.string(), z.unknown()).optional(), receipt: RECEIPT_OUTPUT_SCHEMA.optional(), ...MCP_ERROR_OUTPUT_FIELDS },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, async ({ identifier, expected_version, title, content_markdown, excerpt, category, space, slug, featured, change_summary }) => {
+  }, async ({ identifier, expected_version, title, content_markdown, excerpt, category, space, sort_order, slug, featured, change_summary }) => {
     try {
       const current = await hydratePost(identifier);
       requireScope(auth, scopeForPostWrite(current.status));
@@ -170,6 +173,7 @@ export function registerDraftTools({ server, origin, clientLabel, auth }: McpToo
         content: content_markdown ?? current.content,
         categoryId: resolvedCategory?.id ?? current.categoryId,
         spaceId: nextSpaceId,
+        sortOrder: sort_order ?? current.sortOrder,
         status: current.status,
         featured: nextSpaceId === null ? (featured ?? current.featured) : false,
         publishedAt: current.publishedAt,

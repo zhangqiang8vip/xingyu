@@ -78,6 +78,7 @@ export function changedPostFields(
     content: string;
     categoryId: number;
     spaceId: number | null;
+    sortOrder?: number;
     featured: boolean;
   },
 ) {
@@ -88,6 +89,7 @@ export function changedPostFields(
     current.content !== next.content ? "content_markdown" : null,
     current.categoryId !== next.categoryId ? "category" : null,
     current.spaceId !== next.spaceId ? "space" : null,
+    next.sortOrder !== undefined && current.sortOrder !== next.sortOrder ? "sort_order" : null,
     current.featured !== next.featured ? "featured" : null,
   ].filter((field): field is string => field !== null);
 }

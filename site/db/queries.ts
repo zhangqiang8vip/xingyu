@@ -203,6 +203,33 @@ export async function getNextAdminPost(updatedAt:string,id:number,readerContext?
 
 async function getAdjacentAdminPost(updatedAt:string,id:number,direction:"older"|"newer",readerContext?:AdminReaderContext){
   await ensureDatabase();
+  if(readerContext?.source==="spaces"&&(readerContext.range==="space"||readerContext.range==="private")){
+    const allSpaces=readerContext.range==="private";
+    const roots=allSpaces
+      ? "SELECT id,printf('%010d/',sibling_rank),printf('/%d/',id) FROM ranked WHERE parent_id IS NULL"
+      : "SELECT id,'',printf('/%d/',id) FROM spaces WHERE id=?";
+    const scope=allSpaces||readerContext.includeDescendants?"":"WHERE h.id=?";
+    const params:Array<string|number>=allSpaces?[]:[readerContext.spaceId!];
+    if(scope)params.push(readerContext.spaceId!);
+    const neighbor=await env.DB.prepare(`WITH RECURSIVE ranked AS (
+        SELECT id,parent_id,row_number() OVER (
+          PARTITION BY parent_id ORDER BY sort_order ASC,name COLLATE NOCASE ASC,id ASC
+        ) AS sibling_rank FROM spaces
+      ), hierarchy(id,order_path,visited) AS (
+        ${roots}
+        UNION ALL
+        SELECT child.id,h.order_path||printf('%010d/',child.sibling_rank),h.visited||printf('%d/',child.id)
+        FROM ranked child JOIN hierarchy h ON child.parent_id=h.id
+        WHERE instr(h.visited,printf('/%d/',child.id))=0
+      ), ordered AS (
+        SELECT p.id,row_number() OVER (ORDER BY h.order_path ASC,p.sort_order ASC,p.id ASC) AS position
+        FROM posts p JOIN hierarchy h ON h.id=p.space_id ${scope}
+      )
+      SELECT neighbor.id FROM ordered current
+      JOIN ordered neighbor ON neighbor.position=current.position+?
+      WHERE current.id=? LIMIT 1`).bind(...params,direction==="older"?1:-1,id).first<{id:number}>();
+    return neighbor?env.DB.prepare(`${adminReaderSelection} WHERE p.id=? LIMIT 1`).bind(neighbor.id).first<AdminReaderPost>():null;
+  }
   const older=direction==="older";
   const operator=older?"<":">";
   const order=older?"DESC":"ASC";

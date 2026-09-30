@@ -159,6 +159,7 @@ export function registerReadTools({ server, origin, auth }: McpToolContext) {
         featured: post.featured,
         visibility: post.spaceId ? "space" : "public",
         space: post.spaceId ? { id: post.spaceId, path: spacePath.map((item) => item.name), display_path: spacePath.map((item) => item.name).join(" / ") } : null,
+        sort_order: post.spaceId ? post.sortOrder : null,
         category: category[0] ?? null,
         published_at: post.publishedAt,
         created_at: post.createdAt,

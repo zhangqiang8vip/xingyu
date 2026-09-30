@@ -45,6 +45,7 @@ export function validatePostInput(input: PostPayload) {
   if (input.content.length > MAX_CONTENT_LENGTH) throw new PostWriteError(`Markdown 正文不能超过 ${MAX_CONTENT_LENGTH} 个字符`);
   if (!Number.isInteger(input.categoryId) || input.categoryId < 1) throw new PostWriteError("文章分类无效");
   if (input.spaceId !== null && (!Number.isInteger(input.spaceId) || input.spaceId < 1)) throw new PostWriteError("文章空间无效");
+  if (input.sortOrder !== undefined && !Number.isSafeInteger(input.sortOrder)) throw new PostWriteError("浏览顺序必须是整数");
 }
 
 async function validateSpace(spaceId: number | null) {
@@ -89,12 +90,12 @@ export async function createPostRecord(input: PostPayload, audit?: PostWriteAudi
   let activity: { id: number; createdAt: string } | undefined;
   try {
     const insert = env.DB.prepare(`INSERT INTO posts
-      (public_id, title, slug, excerpt, content, category_id, space_id, status, featured, published_at, author_id, created_by, updated_by)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      (public_id, title, slug, excerpt, content, category_id, space_id, sort_order, status, featured, published_at, author_id, created_by, updated_by)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)
         AND (? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id = ?)) ${eligibility.sql}`).bind(
       publicId, input.title, input.slug, input.excerpt, input.content,
-      input.categoryId, input.spaceId, input.status, input.featured ? 1 : 0, publishedAt,
+      input.categoryId, input.spaceId, input.sortOrder ?? 0, input.status, input.featured ? 1 : 0, publishedAt,
       ownerId, ownerId, ownerId,
       input.categoryId, input.spaceId, input.spaceId,
       ...eligibility.bindings,
@@ -154,7 +155,7 @@ export async function updatePostRecord(id: number, input: PostPayload, expectedV
   await validateSpace(input.spaceId);
 
   const current = await getDb()
-    .select({ publicId: posts.publicId, publishedAt: posts.publishedAt, slug: posts.slug, version: posts.version })
+    .select({ publicId: posts.publicId, publishedAt: posts.publishedAt, slug: posts.slug, sortOrder:posts.sortOrder, version: posts.version })
     .from(posts)
     .where(eq(posts.id, id))
     .limit(1);
@@ -185,13 +186,13 @@ export async function updatePostRecord(id: number, input: PostPayload, expectedV
       .bind(id, expectedVersion, input.slug, input.categoryId,
         input.spaceId, input.spaceId, ...eligibility.bindings);
     const update = env.DB.prepare(`UPDATE posts SET
-      title = ?, slug = ?, excerpt = ?, content = ?, category_id = ?, space_id = ?,
+      title = ?, slug = ?, excerpt = ?, content = ?, category_id = ?, space_id = ?, sort_order = ?,
       status = ?, featured = ?, published_at = ?, updated_at = ?, updated_by = ?, version = version + 1
       WHERE id = ? AND version = ?
       AND EXISTS (SELECT 1 FROM categories WHERE id = ?)
       AND (? IS NULL OR EXISTS (SELECT 1 FROM spaces WHERE id = ?)) ${eligibility.sql}`).bind(
       input.title, input.slug, input.excerpt, input.content, input.categoryId,
-      input.spaceId, input.status, input.featured ? 1 : 0, publishedAt,
+      input.spaceId, input.sortOrder ?? current[0].sortOrder, input.status, input.featured ? 1 : 0, publishedAt,
       new Date().toISOString(), ownerId, id, expectedVersion, input.categoryId,
       input.spaceId, input.spaceId, ...eligibility.bindings,
     );

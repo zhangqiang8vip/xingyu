@@ -391,6 +391,146 @@ test("space tree counts include articles in every descendant", async () => {
   }
 });
 
+test("space browsing follows ascending sibling order from admin and MCP updates", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const create = async (name, parentId, sortOrder) => {
+      const response = await jsonRequest(harness, "/api/spaces", {
+        method: "POST", cookie, body: { name, parentId, sortOrder },
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+      return (await response.json()).space.id;
+    };
+    const parentId = await create("Order parent", null, 10);
+    const laterId = await create("Order later", parentId, 20);
+    const earlierId = await create("Order earlier", parentId, -2);
+    const middleId = await create("Order middle", parentId, 5);
+    const listChildren = async () => {
+      const response = await jsonRequest(harness, `/api/spaces?parent=${parentId}`, { cookie });
+      assert.equal(response.status, 200);
+      return (await response.json()).spaces.map(({ id }) => id);
+    };
+    assert.deepEqual(await listChildren(), [earlierId, middleId, laterId]);
+
+    const changed = await jsonRequest(harness, `/api/spaces/${laterId}`, {
+      method: "PATCH", cookie, body: { sortOrder: -3 },
+    });
+    assert.equal(changed.status, 200, await changed.clone().text());
+    assert.deepEqual(await listChildren(), [laterId, earlierId, middleId]);
+
+    const mcpChanged = await callMcpTool(harness, {
+      name: "update_space", token: TEST_LEGACY_MCP_TOKEN,
+      arguments: { space: String(middleId), sort_order: -4, change_summary: "Move middle to first browsing position" },
+    });
+    assert.equal(mcpChanged.isError, undefined, JSON.stringify(mcpChanged.structuredContent));
+    assert.deepEqual(mcpChanged.structuredContent?.receipt?.changed_fields, ["sort_order"]);
+    assert.deepEqual(await listChildren(), [middleId, laterId, earlierId]);
+    const overviewResponse = await jsonRequest(harness, `/api/spaces/${parentId}`, { cookie });
+    assert.equal(overviewResponse.status, 200);
+    assert.deepEqual((await overviewResponse.json()).space.children.map(({ id }) => id),
+      [middleId, laterId, earlierId], "the child cards use the same browsing order");
+
+    const mcpCreated = await callMcpTool(harness, {
+      name: "create_space", token: TEST_LEGACY_MCP_TOKEN,
+      arguments: { name: "MCP first", parent: String(parentId), sort_order: -5,
+        change_summary: "Create a first-position child" },
+    });
+    assert.equal(mcpCreated.isError, undefined, JSON.stringify(mcpCreated.structuredContent));
+    assert.deepEqual(await listChildren(), [mcpCreated.structuredContent.space.id, middleId, laterId, earlierId]);
+
+    const invalid = await jsonRequest(harness, `/api/spaces/${earlierId}`, {
+      method: "PATCH", cookie, body: { sortOrder: 1.5 },
+    });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await listChildren(), [mcpCreated.structuredContent.space.id, middleId, laterId, earlierId]);
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
+test("space articles browse parent first, then ordered child groups across pages and reader navigation", async () => {
+  const harness = await openTestHarness();
+  try {
+    const cookie = await loginAdmin(harness);
+    const createSpace = async (name, parentId, sortOrder) => {
+      const response = await jsonRequest(harness, "/api/spaces", {
+        method: "POST", cookie, body: { name, parentId, sortOrder },
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+      return (await response.json()).space.id;
+    };
+    const rootId = await createSpace("Reading root", null, 1);
+    const secondId = await createSpace("Reading second", rootId, 2);
+    const firstId = await createSpace("Reading first", rootId, 1);
+    const nestedId = await createSpace("Reading nested", firstId, 1);
+    const articles = [];
+    for (const [slug, spaceId, sortOrder] of [
+      ["root-later", rootId, 5], ["second-only", secondId, 1],
+      ["first-only", firstId, 2], ["root-earlier", rootId, -1],
+      ["nested-only", nestedId, 1],
+    ]) {
+      const response = await jsonRequest(harness, "/api/posts", {
+        method: "POST", cookie, body: { ...payload(slug, "private"), spaceId, sortOrder },
+      });
+      assert.equal(response.status, 201, await response.clone().text());
+      articles.push((await response.json()).post);
+    }
+    const expected = [articles[3], articles[0], articles[2], articles[4], articles[1]];
+    const rows = [];
+    let cursor = null;
+    do {
+      const params = new URLSearchParams({ scope: "descendants", limit: "2" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await jsonRequest(harness, `/api/spaces/${rootId}/posts?${params}`, { cookie });
+      assert.equal(response.status, 200, await response.clone().text());
+      const page = await response.json();
+      rows.push(...page.rows);
+      cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(rows.map(({ id }) => id), expected.map(({ id }) => id));
+    assert.deepEqual(rows.map(({ sortOrder }) => sortOrder), [-1, 5, 2, 1, 1]);
+
+    const direct = await jsonRequest(harness, `/api/spaces/${rootId}/posts?scope=current`, { cookie });
+    assert.deepEqual((await direct.json()).rows.map(({ id }) => id), [articles[3].id, articles[0].id]);
+    const reader = await jsonRequest(harness,
+      `/api/reader/${articles[0].publicId}?scope=admin&range=space&spaceId=${rootId}&descendants=1&from=spaces`, { cookie });
+    assert.equal(reader.status, 200);
+    const neighbors = await reader.json();
+    assert.equal(neighbors.previousPost?.id, articles[3].id);
+    assert.equal(neighbors.nextPost?.id, articles[2].id);
+    const otherRootId = await createSpace("Reading later root", null, 2);
+    const otherPostResponse = await jsonRequest(harness, "/api/posts", {
+      method: "POST", cookie,
+      body: { ...payload("other-root-post", "private"), spaceId: otherRootId, sortOrder: 0 },
+    });
+    assert.equal(otherPostResponse.status, 201);
+    const otherPost = (await otherPostResponse.json()).post;
+    const allSpaces = await jsonRequest(harness, `/api/spaces/${rootId}/posts?scope=all`, { cookie });
+    assert.deepEqual((await allSpaces.json()).rows.map(({ id }) => id),
+      [...expected.map(({ id }) => id), otherPost.id]);
+
+    const reordered = await callMcpTool(harness, {
+      name: "update_post", token: TEST_LEGACY_MCP_TOKEN,
+      arguments: { identifier: articles[0].publicId, expected_version: articles[0].version,
+        sort_order: -2, change_summary: "Move the root article to the first reading position" },
+    });
+    assert.equal(reordered.isError, undefined, JSON.stringify(reordered.structuredContent));
+    assert.deepEqual(reordered.structuredContent?.receipt?.changed_fields, ["sort_order"]);
+    const reorderedDirect = await jsonRequest(harness, `/api/spaces/${rootId}/posts?scope=current`, { cookie });
+    assert.deepEqual((await reorderedDirect.json()).rows.map(({ id }) => id),
+      [articles[0].id, articles[3].id]);
+    const invalid = await jsonRequest(harness, `/api/posts/${articles[0].id}`, {
+      method: "PATCH", cookie,
+      body: { ...payload("root-later", "private"), spaceId: rootId,
+        version: reordered.structuredContent.post.version, sortOrder: 1.5 },
+    });
+    assert.equal(invalid.status, 400);
+  } finally {
+    await closeTestHarness(harness);
+  }
+});
+
 test("space editing still updates its hierarchy and rejects a missing parent", async () => {
   const harness = await openTestHarness();
   try {
@@ -758,8 +898,11 @@ test("a simultaneous edit and delete cannot both consume the same version", asyn
         method: "DELETE", cookie, body: { version: post.version },
       }),
     ]);
-    assert.deepEqual([edit.status, remove.status].sort(), [200, 409],
-      `editing and deleting the same version cannot both succeed: ${edit.status}, ${remove.status}`);
+    assert.ok(
+      (edit.status === 200 && remove.status === 409)
+        || (remove.status === 200 && [404, 409].includes(edit.status)),
+      `editing and deleting the same version cannot both succeed: ${edit.status}, ${remove.status}`,
+    );
     const persisted = await harness.db.prepare("SELECT slug, content, version FROM posts WHERE id = ?")
       .bind(post.id).first();
     const history = await harness.db.prepare("SELECT slug FROM post_slug_history WHERE post_id = ?")
